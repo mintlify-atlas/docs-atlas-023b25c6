@@ -1,0 +1,139 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "IronClaw",
+  "projectDescription": "Secure personal AI assistant that protects your data and expands its capabilities on the fly",
+  "theme": "aspen",
+  "primaryColor": "#31a0f7",
+  "lightColor": "#a2d4fc",
+  "darkColor": "#0c90f8",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/philosophy",
+              "concepts/architecture",
+              "concepts/security"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/onboarding",
+              "configuration/llm-providers",
+              "configuration/database",
+              "configuration/environment-variables"
+            ]
+          },
+          {
+            "group": "Features",
+            "pages": [
+              "features/channels",
+              "features/tools",
+              "features/workspace-memory",
+              "features/routines",
+              "features/sandbox"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "security/wasm-sandbox",
+              "security/prompt-injection",
+              "security/credential-protection",
+              "security/data-protection"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/building-tools",
+              "guides/building-channels",
+              "guides/mcp-servers",
+              "guides/telegram-setup",
+              "guides/docker-sandbox"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/run",
+              "cli/onboard",
+              "cli/config",
+              "cli/tool",
+              "cli/mcp",
+              "cli/memory",
+              "cli/service",
+              "cli/status",
+              "cli/doctor"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Components",
+            "pages": [
+              "api/agent",
+              "api/tools",
+              "api/channels",
+              "api/workspace"
+            ]
+          },
+          {
+            "group": "Tools",
+            "pages": [
+              "api/tools/builtin",
+              "api/tools/wasm",
+              "api/tools/mcp"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "WASM sandbox with capability-based permissions",
+    "Prompt injection defense and content sanitization",
+    "Multi-channel support (REPL, HTTP, Telegram, web gateway)",
+    "Dynamic tool building from natural language",
+    "Hybrid search with full-text and vector embeddings",
+    "Docker sandbox for isolated job execution",
+    "MCP protocol integration",
+    "Cron-based routines and event triggers",
+    "Local-first data storage with encryption"
+  ],
+  "publicApiSurface": [
+    "ironclaw run",
+    "ironclaw onboard",
+    "ironclaw config [list|get|set]",
+    "ironclaw tool [install|list|remove]",
+    "ironclaw mcp [add|auth|list|test]",
+    "ironclaw memory [search|read|write]",
+    "ironclaw service [install|start|stop|status]",
+    "ironclaw doctor",
+    "ironclaw status",
+    "Agent::new",
+    "ToolRegistry",
+    "WasmSandbox",
+    "Workspace"
+  ]
+}
