@@ -93,11 +93,14 @@
               "cli/onboard",
               "cli/config",
               "cli/tool",
+              "cli/registry",
               "cli/mcp",
               "cli/memory",
+              "cli/pairing",
               "cli/service",
               "cli/status",
-              "cli/doctor"
+              "cli/doctor",
+              "cli/completion"
             ]
           }
         ]

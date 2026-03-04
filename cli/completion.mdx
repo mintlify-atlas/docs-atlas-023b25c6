@@ -1,0 +1,302 @@
+---
+title: ironclaw completion
+description: Generate shell completion scripts for ironclaw
+icon: terminal
+---
+
+The `ironclaw completion` command generates shell completion scripts that enable tab completion for IronClaw commands, subcommands, and flags.
+
+## Usage
+
+```bash
+ironclaw completion --shell <shell>
+```
+
+<ParamField path="--shell" type="string" required>
+  Shell to generate completions for. Options: `bash`, `zsh`, `fish`, `powershell`, `elvish`
+</ParamField>
+
+## Supported Shells
+
+<CardGroup cols={2}>
+  <Card title="Bash" icon="terminal">
+    Bourne Again Shell (Linux/macOS default)
+  </Card>
+  <Card title="Zsh" icon="terminal">
+    Z Shell (macOS Catalina+ default)
+  </Card>
+  <Card title="Fish" icon="fish">
+    Friendly Interactive Shell
+  </Card>
+  <Card title="PowerShell" icon="windows">
+    Windows PowerShell / PowerShell Core
+  </Card>
+</CardGroup>
+
+## Installation
+
+### Bash
+
+<Steps>
+  <Step title="Generate completion script">
+    ```bash
+    ironclaw completion --shell bash > ~/.ironclaw-completion.bash
+    ```
+  </Step>
+
+  <Step title="Source in your shell profile">
+    Add to `~/.bashrc` or `~/.bash_profile`:
+    
+    ```bash
+    source ~/.ironclaw-completion.bash
+    ```
+  </Step>
+
+  <Step title="Reload your shell">
+    ```bash
+    source ~/.bashrc
+    ```
+  </Step>
+</Steps>
+
+**Alternative: System-wide installation (requires sudo)**
+
+```bash
+ironclaw completion --shell bash | sudo tee /etc/bash_completion.d/ironclaw
+```
+
+### Zsh
+
+<Steps>
+  <Step title="Generate completion script">
+    ```bash
+    ironclaw completion --shell zsh > ~/.zsh/completions/_ironclaw
+    ```
+    
+    Create the directory if it doesn't exist:
+    ```bash
+    mkdir -p ~/.zsh/completions
+    ```
+  </Step>
+
+  <Step title="Add to fpath">
+    Add to `~/.zshrc` (before `compinit`):
+    
+    ```bash
+    fpath=(~/.zsh/completions $fpath)
+    autoload -Uz compinit
+    compinit
+    ```
+  </Step>
+
+  <Step title="Reload your shell">
+    ```bash
+    source ~/.zshrc
+    ```
+  </Step>
+</Steps>
+
+**Alternative: System-wide installation**
+
+```bash
+ironclaw completion --shell zsh | sudo tee /usr/local/share/zsh/site-functions/_ironclaw
+```
+
+### Fish
+
+<Steps>
+  <Step title="Generate and install completion">
+    ```bash
+    ironclaw completion --shell fish > ~/.config/fish/completions/ironclaw.fish
+    ```
+  </Step>
+
+  <Step title="Reload completions">
+    ```bash
+    fish_update_completions
+    ```
+  </Step>
+</Steps>
+
+### PowerShell
+
+<Steps>
+  <Step title="Generate completion script">
+    ```powershell
+    ironclaw completion --shell powershell > $PROFILE\..\ironclaw-completion.ps1
+    ```
+  </Step>
+
+  <Step title="Source in your PowerShell profile">
+    Add to your `$PROFILE`:
+    
+    ```powershell
+    . (Join-Path (Split-Path -Parent $PROFILE) "ironclaw-completion.ps1")
+    ```
+  </Step>
+
+  <Step title="Reload PowerShell">
+    ```powershell
+    . $PROFILE
+    ```
+  </Step>
+</Steps>
+
+## What Gets Completed
+
+Shell completions provide tab completion for:
+
+- **Commands**: `ironclaw run`, `ironclaw onboard`, `ironclaw config`, etc.
+- **Subcommands**: `config list`, `tool install`, `mcp add`, etc.
+- **Flags**: `--help`, `--version`, `--cli-only`, `--no-db`, etc.
+- **Options**: `--shell bash`, `--kind tool`, `--filter agent`, etc.
+- **Paths**: File paths for `--config`, `--output`, etc. (shell-dependent)
+
+## Examples
+
+### Test completions
+
+After installation, try these examples:
+
+```bash
+# Type and press Tab
+ironclaw <Tab>
+# Shows: run, onboard, config, tool, mcp, memory, registry, pairing, service, doctor, status, completion
+
+# Type and press Tab
+ironclaw config <Tab>
+# Shows: init, list, get, set, reset, path
+
+# Type and press Tab
+ironclaw tool install --<Tab>
+# Shows: --force, --build, --help
+```
+
+### Generate and preview
+
+Generate completion script without installing:
+
+```bash
+# Preview for Bash
+ironclaw completion --shell bash | less
+
+# Save to file
+ironclaw completion --shell zsh > ironclaw.zsh
+```
+
+### Temporary completion
+
+Enable completions for current session only (no file required):
+
+```bash
+# Bash
+source <(ironclaw completion --shell bash)
+
+# Zsh
+source <(ironclaw completion --shell zsh)
+
+# Fish
+ironclaw completion --shell fish | source
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Completions not working after installation">
+    Common issues:
+    
+    1. **Shell not reloaded**: Run `source ~/.bashrc` (or `~/.zshrc`, etc.)
+    2. **Wrong shell**: Verify your current shell with `echo $SHELL`
+    3. **Path not in fpath** (Zsh): Ensure completion directory is in `$fpath` before `compinit`
+    4. **Permissions**: Ensure the completion file is readable: `chmod +r ~/.ironclaw-completion.bash`
+  </Accordion>
+
+  <Accordion title="Zsh completions not loading">
+    For Zsh, ensure:
+    
+    1. The completion file is in a directory listed in `$fpath`:
+       ```bash
+       echo $fpath
+       ```
+    2. The file is named `_ironclaw` (underscore prefix)
+    3. `compinit` is called after adding to `fpath`:
+       ```bash
+       fpath=(~/.zsh/completions $fpath)
+       autoload -Uz compinit
+       compinit
+       ```
+    4. Rebuild completion cache:
+       ```bash
+       rm -f ~/.zcompdump; compinit
+       ```
+  </Accordion>
+
+  <Accordion title="PowerShell execution policy blocked script">
+    If PowerShell blocks the script with an execution policy error:
+    
+    ```powershell
+    Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+    ```
+    
+    Then reload the profile:
+    ```powershell
+    . $PROFILE
+    ```
+  </Accordion>
+
+  <Accordion title="Completions are outdated after IronClaw update">
+    After updating IronClaw, regenerate completions to include new commands:
+    
+    ```bash
+    # Bash
+    ironclaw completion --shell bash > ~/.ironclaw-completion.bash
+    source ~/.bashrc
+    
+    # Zsh
+    ironclaw completion --shell zsh > ~/.zsh/completions/_ironclaw
+    rm -f ~/.zcompdump; source ~/.zshrc
+    
+    # Fish
+    ironclaw completion --shell fish > ~/.config/fish/completions/ironclaw.fish
+    fish_update_completions
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Pre-generated Completions
+
+IronClaw releases include pre-generated completion scripts in the installation directory:
+
+```bash
+~/.cargo/bin/ironclaw.bash   # Bash
+~/.cargo/bin/ironclaw.zsh    # Zsh
+~/.cargo/bin/ironclaw.fish   # Fish
+```
+
+You can source these directly instead of generating:
+
+```bash
+# Bash
+echo 'source ~/.cargo/bin/ironclaw.bash' >> ~/.bashrc
+
+# Zsh
+echo 'source ~/.cargo/bin/ironclaw.zsh' >> ~/.zshrc
+
+# Fish
+ln -s ~/.cargo/bin/ironclaw.fish ~/.config/fish/completions/ironclaw.fish
+```
+
+<Note>
+  Pre-generated completions are only available for installations via the official installer or Homebrew. Cargo installations do not include these files.
+</Note>
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw --help" icon="circle-info" href="/cli/run">
+    View all available commands and flags
+  </Card>
+  <Card title="Shell configuration" icon="gear" href="/installation">
+    Installation and shell setup guide
+  </Card>
+</CardGroup>

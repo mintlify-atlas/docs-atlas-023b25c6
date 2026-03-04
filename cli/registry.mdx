@@ -1,0 +1,302 @@
+---
+title: ironclaw registry
+description: Browse and install extensions from the IronClaw registry
+icon: store
+---
+
+The `ironclaw registry` command lets you discover, browse, and install pre-built extensions (tools and channels) from the IronClaw extension registry.
+
+## Usage
+
+```bash
+ironclaw registry <subcommand>
+```
+
+## Subcommands
+
+### list
+
+List available extensions in the registry.
+
+```bash
+ironclaw registry list [OPTIONS]
+```
+
+<ParamField path="--kind" type="string">
+  Filter by extension type: `tool` or `channel`
+</ParamField>
+
+<ParamField path="--tag" type="string">
+  Filter by tag (e.g., `default`, `google`, `messaging`)
+</ParamField>
+
+<ParamField path="--verbose" type="boolean">
+  Show detailed information for each extension
+</ParamField>
+
+**Example:**
+
+```bash
+# List all extensions
+ironclaw registry list
+
+# List only tools
+ironclaw registry list --kind tool
+
+# List extensions tagged with "google"
+ironclaw registry list --tag google
+
+# Show detailed information
+ironclaw registry list --verbose
+```
+
+### info
+
+Show detailed information about a specific extension or bundle.
+
+```bash
+ironclaw registry info <name>
+```
+
+<ParamField path="name" type="string" required>
+  Extension or bundle name (e.g., `slack`, `google`, `tools/gmail`)
+</ParamField>
+
+**Example:**
+
+```bash
+# Show info about the Slack channel
+ironclaw registry info slack
+
+# Show info about the Google bundle
+ironclaw registry info google
+
+# Show info about the Gmail tool
+ironclaw registry info tools/gmail
+```
+
+### install
+
+Install an extension or bundle from the registry.
+
+```bash
+ironclaw registry install <name> [OPTIONS]
+```
+
+<ParamField path="name" type="string" required>
+  Extension or bundle name to install
+</ParamField>
+
+<ParamField path="--force" type="boolean">
+  Force overwrite if already installed
+</ParamField>
+
+<ParamField path="--build" type="boolean">
+  Build from source instead of downloading pre-built artifact
+</ParamField>
+
+**Example:**
+
+```bash
+# Install Slack channel
+ironclaw registry install slack
+
+# Install and overwrite existing
+ironclaw registry install slack --force
+
+# Build from source
+ironclaw registry install slack --build
+
+# Install entire Google bundle
+ironclaw registry install google
+```
+
+### install-defaults
+
+Install the default bundle of recommended extensions.
+
+```bash
+ironclaw registry install-defaults [OPTIONS]
+```
+
+<ParamField path="--force" type="boolean">
+  Force overwrite if already installed
+</ParamField>
+
+<ParamField path="--build" type="boolean">
+  Build from source instead of downloading pre-built artifacts
+</ParamField>
+
+**Example:**
+
+```bash
+# Install default extensions
+ironclaw registry install-defaults
+
+# Force reinstall
+ironclaw registry install-defaults --force
+```
+
+## Extension Types
+
+The registry contains two types of extensions:
+
+<CardGroup cols={2}>
+  <Card title="Tools" icon="wrench">
+    WASM-based tools that extend IronClaw's capabilities (e.g., Gmail, GitHub, Slack integrations)
+  </Card>
+  <Card title="Channels" icon="tower-broadcast">
+    WASM-based communication channels for connecting to messaging platforms (e.g., Telegram, Slack, Discord)
+  </Card>
+</CardGroup>
+
+## Bundles
+
+Bundles are collections of related extensions that can be installed together:
+
+- **default** - Recommended set of extensions for common use cases
+- **google** - All Google Workspace tools (Gmail, Drive, Docs, Sheets, Calendar)
+- **messaging** - Popular messaging channels (Telegram, Slack, Discord)
+
+## Extension Sources
+
+Extensions can be installed from:
+
+1. **Pre-built artifacts** - Compiled WASM binaries (default, faster)
+2. **Source code** - Build from source using `--build` flag (requires Rust toolchain)
+
+<Note>
+  Pre-built artifacts are hosted on GitHub releases and are the recommended installation method for most users.
+</Note>
+
+## Examples
+
+### Browse available extensions
+
+```bash
+# List all extensions
+ironclaw registry list
+
+# List with full details
+ironclaw registry list --verbose
+```
+
+**Example output:**
+
+```text
+Available extensions:
+
+Tools (15):
+  - tools/gmail         Google Gmail integration
+  - tools/github        GitHub API integration
+  - tools/slack         Slack workspace integration
+  - tools/web-search    Web search capabilities
+  ...
+
+Channels (5):
+  - telegram           Telegram messaging channel
+  - slack              Slack workspace channel
+  - discord            Discord server channel
+  ...
+
+Bundles (3):
+  - default            Recommended starter bundle
+  - google             All Google Workspace tools
+  - messaging          Popular messaging channels
+```
+
+### Install specific extensions
+
+```bash
+# Install Gmail tool
+ironclaw registry install tools/gmail
+
+# Install Telegram channel
+ironclaw registry install telegram
+```
+
+### Install a bundle
+
+```bash
+# Install Google Workspace bundle (Gmail, Drive, Docs, Sheets, Calendar)
+ironclaw registry install google
+```
+
+### Get extension details
+
+```bash
+# Show detailed info about Slack
+ironclaw registry info slack
+```
+
+**Example output:**
+
+```text
+Extension: slack
+Type: channel
+Version: 0.13.0
+Description: Slack workspace channel for IronClaw
+
+Features:
+  - Direct messages
+  - Channel messages
+  - Thread support
+  - File uploads
+  - Slash commands
+
+Requirements:
+  - Slack workspace
+  - Bot token with required scopes
+
+Capabilities:
+  - HTTP requests to api.slack.com
+  - Workspace read/write
+  - Credential injection
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Registry connection failed">
+    The registry requires internet access to GitHub. Common issues:
+    
+    - **Network connectivity**: Verify you can reach `github.com`
+    - **Proxy settings**: Set `HTTPS_PROXY` if behind a corporate proxy
+    - **Rate limiting**: GitHub API may be rate-limited; wait and try again
+  </Accordion>
+
+  <Accordion title="Installation failed">
+    If extension installation fails:
+    
+    1. Check you have write permissions to the extensions directory (`~/.ironclaw/extensions/`)
+    2. Try with `--force` to overwrite corrupted installations
+    3. If using `--build`, ensure Rust toolchain is installed: `rustup --version`
+    4. Check the specific error message for details
+  </Accordion>
+
+  <Accordion title="Extension not working after install">
+    After installing an extension:
+    
+    1. Restart IronClaw to load the new extension
+    2. For tools: Check if authentication is required with `ironclaw tool auth <name>`
+    3. For channels: Configure secrets with `ironclaw onboard --channels-only`
+    4. Run `ironclaw doctor` to diagnose issues
+  </Accordion>
+</AccordionGroup>
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw tool" icon="wrench" href="/cli/tool">
+    Manage installed WASM tools
+  </Card>
+  <Card title="ironclaw onboard" icon="rocket" href="/cli/onboard">
+    Configure extensions and channels
+  </Card>
+  <Card title="Building tools" icon="hammer" href="/guides/building-tools">
+    Create your own WASM tools
+  </Card>
+  <Card title="Building channels" icon="plug" href="/guides/building-channels">
+    Create your own WASM channels
+  </Card>
+</CardGroup>

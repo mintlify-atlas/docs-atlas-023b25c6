@@ -1,0 +1,274 @@
+---
+title: ironclaw pairing
+description: Manage DM pairing requests for messaging channels
+icon: handshake
+---
+
+The `ironclaw pairing` command manages direct message (DM) pairing requests for messaging channels like Telegram and Slack. Pairing allows you to approve or deny incoming messages from unknown senders.
+
+## Usage
+
+```bash
+ironclaw pairing <subcommand>
+```
+
+## Subcommands
+
+### list
+
+List pending pairing requests for a channel.
+
+```bash
+ironclaw pairing list <channel> [OPTIONS]
+```
+
+<ParamField path="channel" type="string" required>
+  Channel name (e.g., `telegram`, `slack`)
+</ParamField>
+
+<ParamField path="--json" type="boolean">
+  Output results in JSON format
+</ParamField>
+
+**Example:**
+
+```bash
+# List Telegram pairing requests
+ironclaw pairing list telegram
+
+# Output as JSON
+ironclaw pairing list telegram --json
+```
+
+**Example output:**
+
+```text
+Pending pairing requests for telegram:
+
+  Code: ABC12345
+  From: @john_doe (User ID: 123456789)
+  Received: 2025-03-04 10:30:42
+  Message: "Hi, I'd like to connect with IronClaw"
+
+  Code: XYZ67890
+  From: @jane_smith (User ID: 987654321)
+  Received: 2025-03-04 11:15:18
+  Message: "Hello!"
+
+Use 'ironclaw pairing approve <channel> <code>' to approve a request.
+```
+
+### approve
+
+Approve a pairing request by code.
+
+```bash
+ironclaw pairing approve <channel> <code>
+```
+
+<ParamField path="channel" type="string" required>
+  Channel name (e.g., `telegram`, `slack`)
+</ParamField>
+
+<ParamField path="code" type="string" required>
+  Pairing code to approve (e.g., `ABC12345`)
+</ParamField>
+
+**Example:**
+
+```bash
+# Approve a Telegram pairing request
+ironclaw pairing approve telegram ABC12345
+
+# Approve a Slack pairing request
+ironclaw pairing approve slack XYZ67890
+```
+
+**Example output:**
+
+```text
+✓ Approved pairing request ABC12345 for telegram
+  From: @john_doe (123456789)
+  
+The user can now send direct messages to your IronClaw agent.
+```
+
+## How DM Pairing Works
+
+IronClaw's DM pairing system protects you from unsolicited messages while allowing approved users to communicate with your agent.
+
+<Steps>
+  <Step title="Pairing request initiated">
+    When an unknown user sends a message to your IronClaw agent through a channel (Telegram, Slack, etc.), the message is queued and a pairing code is generated.
+  </Step>
+
+  <Step title="User receives pairing code">
+    The sender receives a message with a unique pairing code and instructions to wait for approval:
+    
+    ```text
+    Your message has been queued for approval.
+    Pairing code: ABC12345
+    
+    Please wait for the agent owner to approve your request.
+    ```
+  </Step>
+
+  <Step title="Owner lists pending requests">
+    The IronClaw owner runs `ironclaw pairing list <channel>` to see pending requests with codes, user information, and original messages.
+  </Step>
+
+  <Step title="Owner approves or ignores">
+    The owner can:
+    - **Approve**: Run `ironclaw pairing approve <channel> <code>` to allow future messages
+    - **Ignore**: Leave the request pending (it will expire after a configurable timeout)
+  </Step>
+
+  <Step title="User can now communicate">
+    Once approved, the user can freely send messages to the IronClaw agent. The queued message is also delivered.
+  </Step>
+</Steps>
+
+## Pairing Policies
+
+Channels can be configured with different pairing policies:
+
+<CardGroup cols={2}>
+  <Card title="Strict (default)" icon="lock">
+    All unknown senders must be explicitly approved via pairing codes
+  </Card>
+  <Card title="Allow all" icon="unlock">
+    Accept messages from anyone without pairing (not recommended for privacy)
+  </Card>
+  <Card title="Allowlist only" icon="list-check">
+    Only accept messages from a pre-configured list of user IDs
+  </Card>
+  <Card title="Denylist" icon="ban">
+    Accept all messages except from blocked user IDs
+  </Card>
+</CardGroup>
+
+<Note>
+  Pairing policies are configured per-channel in the onboarding wizard or via environment variables. See the [channel configuration guide](/features/channels) for details.
+</Note>
+
+## Pairing Expiration
+
+Pairing requests expire after a configurable timeout (default: 24 hours). Expired requests are automatically removed from the pending list.
+
+To adjust expiration:
+
+```bash
+# Set expiration to 48 hours (in seconds)
+export TELEGRAM_PAIRING_EXPIRATION_SECS=172800
+```
+
+## Examples
+
+### Approve a Telegram DM request
+
+```bash
+# List pending requests
+ironclaw pairing list telegram
+
+# Output:
+#   Code: ABC12345
+#   From: @alice (123456789)
+#   Message: "Hi! I need help with my code"
+
+# Approve the request
+ironclaw pairing approve telegram ABC12345
+
+# Alice can now send messages freely
+```
+
+### Monitor pairing requests in JSON
+
+```bash
+# Export pending requests to JSON
+ironclaw pairing list telegram --json > pending.json
+
+# Process with jq
+ironclaw pairing list telegram --json | jq '.[] | {code, user_id, message}'
+```
+
+### Batch approval workflow
+
+```bash
+#!/bin/bash
+# List all pending Telegram requests
+codes=$(ironclaw pairing list telegram --json | jq -r '.[].code')
+
+# Review and approve each
+for code in $codes; do
+  echo "Approve $code? (y/n)"
+  read -r response
+  if [ "$response" = "y" ]; then
+    ironclaw pairing approve telegram "$code"
+  fi
+done
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Pairing list is empty">
+    If `ironclaw pairing list` shows no requests:
+    
+    - Ensure the channel is running and connected
+    - Verify the channel is configured with pairing enabled (not `allow_all` policy)
+    - Check if requests have expired (default: 24 hours)
+    - Ensure messages are being sent to the correct bot/channel
+  </Accordion>
+
+  <Accordion title="Approval failed: code not found">
+    If approval fails with "code not found":
+    
+    - Verify the code is correct (codes are case-sensitive)
+    - The request may have expired (default: 24 hours)
+    - List current requests again: `ironclaw pairing list <channel>`
+  </Accordion>
+
+  <Accordion title="User still can't send messages after approval">
+    If messages are still blocked after approval:
+    
+    1. Restart the IronClaw agent to reload pairing state
+    2. Verify the channel is running: `ironclaw status`
+    3. Check the channel policy: `ironclaw config get channels.<channel>.pairing_policy`
+    4. Ensure no denylist is blocking the user ID
+  </Accordion>
+
+  <Accordion title="How do I disable pairing?">
+    To disable pairing and accept all messages (not recommended):
+    
+    ```bash
+    # For Telegram
+    export TELEGRAM_PAIRING_POLICY=allow_all
+    
+    # Restart IronClaw
+    ironclaw service restart
+    ```
+    
+    Or reconfigure during onboarding:
+    
+    ```bash
+    ironclaw onboard --channels-only
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="Telegram setup" icon="telegram" href="/guides/telegram-setup">
+    Configure Telegram channel with pairing
+  </Card>
+  <Card title="Channels overview" icon="tower-broadcast" href="/features/channels">
+    Learn about IronClaw's multi-channel architecture
+  </Card>
+  <Card title="ironclaw status" icon="circle-info" href="/cli/status">
+    Check channel connection status
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/environment-variables">
+    Channel environment variables
+  </Card>
+</CardGroup>
