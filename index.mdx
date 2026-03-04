@@ -1,97 +1,228 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: Your secure personal AI assistant
+description: IronClaw protects your data with defense-in-depth security while expanding its capabilities on the fly
+mode: custom
 ---
 
-## Setting up
+<div className="relative overflow-hidden dark:bg-[#0f1117] bg-white py-20">
+  <div className="absolute inset-0 bg-gradient-to-br from-[#31a0f7]/10 via-transparent to-[#0c90f8]/5" />
+  <div className="relative max-w-7xl mx-auto px-6 lg:px-8">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
+      <div className="lg:col-span-7">
+        <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold dark:text-white text-gray-900 mb-6">
+          Your secure personal AI assistant
+        </h1>
+        <p className="text-lg sm:text-xl dark:text-gray-400 text-gray-600 mb-8 max-w-2xl">
+          IronClaw is built on a simple principle: your AI assistant should work for you, not against you. With defense-in-depth security, local-first data storage, and self-expanding capabilities, IronClaw is the AI assistant you can actually trust.
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <a
+            href="/quickstart"
+            className="inline-flex items-center px-6 py-3 rounded-lg bg-[#31a0f7] text-white font-semibold hover:bg-[#0c90f8] transition-colors"
+          >
+            Get started
+            <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          <a
+            href="/concepts/security"
+            className="inline-flex items-center px-6 py-3 rounded-lg border-2 dark:border-white/20 border-gray-300 dark:bg-white/5 bg-transparent dark:text-white text-gray-900 font-semibold dark:hover:border-[#31a0f7] hover:border-[#31a0f7] transition-colors"
+          >
+            Security features
+          </a>
+        </div>
+      </div>
+      <div className="lg:col-span-5 hidden lg:block">
+        <div className="relative">
+          <div className="absolute inset-0 bg-gradient-to-r from-[#31a0f7] to-[#0c90f8] rounded-2xl blur-3xl opacity-20" />
+          <div className="relative dark:bg-[#1a1d27] bg-gray-50 rounded-2xl p-8 border dark:border-[#27272a] border-gray-200">
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-[#31a0f7]" />
+                <span className="dark:text-gray-300 text-gray-700 font-mono text-sm">WASM sandbox active</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-[#31a0f7]" />
+                <span className="dark:text-gray-300 text-gray-700 font-mono text-sm">Prompt injection defense enabled</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-[#31a0f7]" />
+                <span className="dark:text-gray-300 text-gray-700 font-mono text-sm">Credentials protected</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-3 h-3 rounded-full bg-[#31a0f7]" />
+                <span className="dark:text-gray-300 text-gray-700 font-mono text-sm">Local-first storage</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold dark:text-white text-gray-900 mb-4">Get started in minutes</h2>
+    <p className="text-lg dark:text-gray-400 text-gray-600">Follow these steps to install and configure IronClaw</p>
+  </div>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+  <Steps>
+    <Step title="Install IronClaw">
+      Install IronClaw using your preferred package manager or download the binary directly:
 
-## Make it yours
+      <CodeGroup>
+      ```bash Shell script (macOS/Linux)
+      curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.sh | sh
+      ```
 
-Design a docs site that looks great and empowers your users.
+      ```powershell PowerShell (Windows)
+      irm https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.ps1 | iex
+      ```
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+      ```bash Homebrew (macOS/Linux)
+      brew install ironclaw
+      ```
 
-## Create beautiful pages
+      ```bash Cargo
+      cargo install ironclaw
+      ```
+      </CodeGroup>
+    </Step>
 
-Everything you need to create world-class documentation.
+    <Step title="Set up your database">
+      IronClaw requires PostgreSQL with the pgvector extension for persistent storage:
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+      ```bash
+      # Create database
+      createdb ironclaw
 
-## Need inspiration?
+      # Enable pgvector extension
+      psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+      ```
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+      <Note>
+        You can also use libSQL/Turso as an embedded database alternative. See the [database configuration guide](/configuration/database) for details.
+      </Note>
+    </Step>
+
+    <Step title="Run the onboarding wizard">
+      Configure IronClaw with the interactive setup wizard:
+
+      ```bash
+      ironclaw onboard
+      ```
+
+      The wizard will guide you through:
+      - Database connection setup
+      - LLM provider authentication (NEAR AI by default)
+      - Secrets encryption configuration
+      - Optional channel setup (Telegram, HTTP, etc.)
+    </Step>
+
+    <Step title="Start using IronClaw">
+      Launch the interactive REPL to start chatting with your assistant:
+
+      ```bash
+      ironclaw run
+      ```
+
+      You can also use single-message mode for quick queries:
+
+      ```bash
+      ironclaw -m "What's the weather like today?"
+      ```
+    </Step>
+  </Steps>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold dark:text-white text-gray-900 mb-4">Security-first architecture</h2>
+    <p className="text-lg dark:text-gray-400 text-gray-600">Multiple layers of defense protect your data and credentials</p>
+  </div>
+
+  <CardGroup cols={2}>
+    <Card title="WASM sandbox" icon="shield-halved" href="/security/wasm-sandbox">
+      Untrusted tools run in isolated WebAssembly containers with capability-based permissions and resource limits
+    </Card>
+    <Card title="Prompt injection defense" icon="lock" href="/security/prompt-injection">
+      Pattern detection, content sanitization, and policy enforcement prevent malicious prompt injection attacks
+    </Card>
+    <Card title="Credential protection" icon="key" href="/security/credential-protection">
+      Secrets are encrypted with AES-256-GCM and never exposed to tools or LLMs—injected only at the host boundary
+    </Card>
+    <Card title="Data protection" icon="database" href="/security/data-protection">
+      All data stored locally in your PostgreSQL database with no telemetry, analytics, or data sharing
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold dark:text-white text-gray-900 mb-4">Powerful features</h2>
+    <p className="text-lg dark:text-gray-400 text-gray-600">Everything you need for a personal AI assistant</p>
+  </div>
+
+  <CardGroup cols={3}>
+    <Card title="Multi-channel support" icon="comments" href="/features/channels">
+      Connect via REPL, HTTP webhooks, Telegram, web gateway, or Signal—all channels work simultaneously
+    </Card>
+    <Card title="Dynamic tool building" icon="wrench" href="/features/tools">
+      Describe what you need and IronClaw builds it as a WASM tool with automatic capability detection
+    </Card>
+    <Card title="Persistent memory" icon="brain" href="/features/workspace-memory">
+      Hybrid search with full-text and vector embeddings for context-aware conversations
+    </Card>
+    <Card title="Automated routines" icon="clock" href="/features/routines">
+      Schedule background tasks with cron expressions or trigger actions from webhooks and events
+    </Card>
+    <Card title="Docker sandbox" icon="docker" href="/features/sandbox">
+      Execute complex jobs in isolated containers with per-job tokens and orchestrator/worker pattern
+    </Card>
+    <Card title="MCP integration" icon="plug" href="/guides/mcp-servers">
+      Connect to Model Context Protocol servers for additional capabilities like GitHub, Gmail, and more
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="text-center mb-12">
+    <h2 className="text-3xl font-bold dark:text-white text-gray-900 mb-4">Explore the documentation</h2>
+    <p className="text-lg dark:text-gray-400 text-gray-600">Find guides, references, and examples for every feature</p>
+  </div>
+
+  <CardGroup cols={2}>
+    <Card title="Core concepts" icon="book-open" href="/concepts/philosophy">
+      Learn about IronClaw's philosophy, architecture, and security model
+    </Card>
+    <Card title="Configuration" icon="gear" href="/configuration/onboarding">
+      Configure LLM providers, database connections, and environment variables
+    </Card>
+    <Card title="CLI reference" icon="terminal" href="/cli/run">
+      Complete reference for all commands, subcommands, and flags
+    </Card>
+    <Card title="API reference" icon="code" href="/api/agent">
+      Rust API documentation for embedding IronClaw in your own applications
+    </Card>
+  </CardGroup>
+</div>
+
+<div className="mt-20 mb-16 max-w-5xl mx-auto px-6">
+  <div className="dark:bg-[#1a1d27] bg-gray-50 rounded-2xl p-12 border dark:border-[#27272a] border-gray-200 text-center">
+    <h2 className="text-3xl font-bold dark:text-white text-gray-900 mb-4">Ready to get started?</h2>
+    <p className="text-lg dark:text-gray-400 text-gray-600 mb-8 max-w-2xl mx-auto">
+      Install IronClaw and start building with a secure AI assistant that protects your data
+    </p>
+    <a
+      href="/quickstart"
+      className="inline-flex items-center px-8 py-4 rounded-lg bg-[#31a0f7] text-white font-semibold hover:bg-[#0c90f8] transition-colors"
+    >
+      Get started now
+      <svg className="ml-2 w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+      </svg>
+    </a>
+  </div>
+</div>

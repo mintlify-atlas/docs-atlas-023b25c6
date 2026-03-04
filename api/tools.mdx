@@ -1,0 +1,286 @@
+---
+title: 'Tool API'
+description: 'Extensible tool system for agent capabilities'
+---
+
+## Overview
+
+Tools are the agent's interface to the outside world. The tool system provides:
+
+- Trait-based extensibility for custom tools
+- Built-in tools (shell, HTTP, file operations, memory)
+- WASM-based sandboxed tool execution
+- MCP (Model Context Protocol) integration
+- Rate limiting and approval requirements
+- Cost estimation and timeout configuration
+
+## Tool Trait
+
+All tools implement the `Tool` trait for uniform execution.
+
+```rust src/tools/tool.rs
+#[async_trait]
+pub trait Tool: Send + Sync {
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
+    fn parameters_schema(&self) -> serde_json::Value;
+    
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        ctx: &JobContext,
+    ) -> Result<ToolOutput, ToolError>;
+    
+    fn estimated_cost(&self, params: &serde_json::Value) -> Option<Decimal>;
+    fn estimated_duration(&self, params: &serde_json::Value) -> Option<Duration>;
+    fn requires_sanitization(&self) -> bool;
+    fn requires_approval(&self, params: &serde_json::Value) -> ApprovalRequirement;
+    fn execution_timeout(&self) -> Duration;
+    fn domain(&self) -> ToolDomain;
+    fn rate_limit_config(&self) -> Option<ToolRateLimitConfig>;
+    fn schema(&self) -> ToolSchema;
+}
+```
+
+### Required Methods
+
+<ParamField path="name" type="&str" required>
+  Unique identifier for the tool
+</ParamField>
+
+<ParamField path="description" type="&str" required>
+  Human-readable description of what the tool does
+</ParamField>
+
+<ParamField path="parameters_schema" type="serde_json::Value" required>
+  JSON Schema defining the tool's input parameters
+</ParamField>
+
+<ParamField path="execute" type="async fn" required>
+  Execute the tool with the given parameters and context
+</ParamField>
+
+### Optional Methods
+
+<ParamField path="estimated_cost" type="Option<Decimal>">
+  Estimated cost of running this tool (for budget tracking)
+</ParamField>
+
+<ParamField path="estimated_duration" type="Option<Duration>">
+  Expected execution time
+</ParamField>
+
+<ParamField path="requires_sanitization" type="bool" default="true">
+  Whether output needs sanitization (true for external services)
+</ParamField>
+
+<ParamField path="requires_approval" type="ApprovalRequirement" default="Never">
+  Whether this tool requires user approval before execution
+</ParamField>
+
+<ParamField path="execution_timeout" type="Duration" default="60s">
+  Maximum execution time before timeout
+</ParamField>
+
+<ParamField path="domain" type="ToolDomain" default="Orchestrator">
+  Where the tool executes: `Orchestrator` (main process) or `Container` (sandboxed)
+</ParamField>
+
+<ParamField path="rate_limit_config" type="Option<ToolRateLimitConfig>">
+  Per-user rate limiting configuration
+</ParamField>
+
+## ToolRegistry
+
+Registry for managing available tools.
+
+### Constructor
+
+```rust src/tools/registry.rs
+pub fn new() -> Self
+```
+
+Creates a new empty registry.
+
+### register
+
+```rust src/tools/registry.rs
+pub async fn register(&self, tool: Arc<dyn Tool>)
+```
+
+Registers a tool. Rejects dynamic tools that try to shadow built-in names.
+
+### get
+
+```rust src/tools/registry.rs
+pub async fn get(&self, name: &str) -> Option<Arc<dyn Tool>>
+```
+
+Get a tool by name.
+
+### list
+
+```rust src/tools/registry.rs
+pub async fn list(&self) -> Vec<String>
+```
+
+List all registered tool names.
+
+### tool_definitions
+
+```rust src/tools/registry.rs
+pub async fn tool_definitions(&self) -> Vec<ToolDefinition>
+```
+
+Get tool definitions for LLM function calling.
+
+### Bulk Registration Methods
+
+```rust src/tools/registry.rs
+pub fn register_builtin_tools(&self)
+pub fn register_orchestrator_tools(&self)
+pub fn register_container_tools(&self)
+pub fn register_memory_tools(&self, workspace: Arc<Workspace>)
+pub fn register_job_tools(&self, /* ... */)
+pub fn register_extension_tools(&self, manager: Arc<ExtensionManager>)
+pub fn register_skill_tools(&self, registry: Arc<RwLock<SkillRegistry>>, catalog: Arc<SkillCatalog>)
+pub fn register_routine_tools(&self, store: Arc<dyn Database>, engine: Arc<RoutineEngine>)
+```
+
+## ToolOutput
+
+Result from a tool execution.
+
+```rust src/tools/tool.rs
+pub struct ToolOutput {
+    pub result: serde_json::Value,
+    pub cost: Option<Decimal>,
+    pub duration: Duration,
+    pub raw: Option<String>,
+}
+```
+
+<ResponseField name="result" type="serde_json::Value" required>
+  The output data (JSON value)
+</ResponseField>
+
+<ResponseField name="cost" type="Option<Decimal>">
+  Cost incurred by this execution
+</ResponseField>
+
+<ResponseField name="duration" type="Duration" required>
+  Time taken to execute
+</ResponseField>
+
+<ResponseField name="raw" type="Option<String>">
+  Raw output before sanitization (for debugging)
+</ResponseField>
+
+## ToolError
+
+Error types for tool execution.
+
+```rust src/tools/tool.rs
+pub enum ToolError {
+    InvalidParameters(String),
+    ExecutionFailed(String),
+    Timeout(Duration),
+    NotAuthorized(String),
+    RateLimited(Option<Duration>),
+    ExternalService(String),
+    Sandbox(String),
+}
+```
+
+## ApprovalRequirement
+
+Defines when a tool requires user approval.
+
+```rust src/tools/tool.rs
+pub enum ApprovalRequirement {
+    /// No approval needed
+    Never,
+    /// Needs approval, but session auto-approve can bypass
+    UnlessAutoApproved,
+    /// Always needs explicit approval
+    Always,
+}
+```
+
+## ToolDomain
+
+Defines where a tool executes.
+
+```rust src/tools/tool.rs
+pub enum ToolDomain {
+    /// Safe to run in orchestrator (pure functions, memory, job management)
+    Orchestrator,
+    /// Must run inside sandboxed container (filesystem, shell, code)
+    Container,
+}
+```
+
+## ToolRateLimitConfig
+
+Per-tool rate limiting configuration.
+
+```rust src/tools/tool.rs
+pub struct ToolRateLimitConfig {
+    pub requests_per_minute: u32,
+    pub requests_per_hour: u32,
+}
+```
+
+## Example: Custom Tool
+
+```rust
+use ironclaw::tools::{Tool, ToolOutput, ToolError};
+use async_trait::async_trait;
+use std::time::Duration;
+
+#[derive(Debug)]
+pub struct MyTool;
+
+#[async_trait]
+impl Tool for MyTool {
+    fn name(&self) -> &str {
+        "my_tool"
+    }
+    
+    fn description(&self) -> &str {
+        "Does something useful"
+    }
+    
+    fn parameters_schema(&self) -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": "Input data"
+                }
+            },
+            "required": ["input"]
+        })
+    }
+    
+    async fn execute(
+        &self,
+        params: serde_json::Value,
+        ctx: &JobContext,
+    ) -> Result<ToolOutput, ToolError> {
+        let input = params.get("input")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidParameters("missing input".into()))?;
+        
+        // Do work here
+        let result = format!("Processed: {}", input);
+        
+        Ok(ToolOutput::text(result, Duration::from_millis(10)))
+    }
+}
+
+// Register the tool
+let registry = ToolRegistry::new();
+registry.register(Arc::new(MyTool)).await;
+```

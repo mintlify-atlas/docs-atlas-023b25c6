@@ -1,0 +1,371 @@
+---
+title: 'ironclaw memory'
+description: 'Query and manage workspace memory'
+icon: 'brain'
+---
+
+## Overview
+
+The `ironclaw memory` command provides direct access to the workspace memory system without starting the full agent. Use it to search, read, write, and organize documents in the agent's workspace.
+
+<Info>
+  The workspace is a virtual file system where the agent stores notes, conversation history, user data, and identity files.
+</Info>
+
+## Subcommands
+
+### search
+
+Search workspace memory using hybrid full-text and semantic search:
+
+```bash
+ironclaw memory search <QUERY> [OPTIONS]
+```
+
+<ParamField path="query" type="string" required>
+  Search query. Can be keywords, questions, or natural language.
+</ParamField>
+
+<ParamField path="-l, --limit" type="integer" default="5">
+  Maximum number of results to return.
+</ParamField>
+
+**Examples:**
+
+```bash
+ironclaw memory search "meeting notes from last week"
+ironclaw memory search "TODO" --limit 10
+ironclaw memory search "what did I discuss about the project?"
+```
+
+**Output:**
+
+```bash
+Found 3 result(s) for "meeting notes from last week":
+
+1. [=====>] (score: 0.847)
+   notes/meetings/2024-03-01-standup.md
+   
+   # Team Standup - March 1, 2024
+   
+   ## Attendees
+   - Alice, Bob, Charlie
+   
+   ## Discussion
+   - Reviewed sprint progress
+   - Discussed blockers on authentication feature...
+
+2. [====>] (score: 0.623)
+   daily/2024-02-28.md
+   
+   Prepared agenda for tomorrow's meeting. Need to discuss:
+   - API rate limiting
+   - Database migration strategy
+   - Testing coverage...
+
+3. [===>] (score: 0.412)
+   HEARTBEAT.md
+   
+   Last updated: 2024-03-01
+   Recent activities:
+   - Attended team standup
+   - Code review for PR #42...
+```
+
+**Score indicators:**
+- `=====>` - Very relevant (score > 0.8)
+- `====>` - Relevant (score > 0.5)
+- `===>` - Somewhat relevant (score > 0.3)
+- `==>` - Low relevance (score > 0.1)
+- `=>` - Minimal relevance (score ≤ 0.1)
+
+### read
+
+Read a file from the workspace:
+
+```bash
+ironclaw memory read <PATH>
+```
+
+<ParamField path="path" type="string" required>
+  File path in the workspace (e.g., "MEMORY.md", "daily/2024-01-15.md").
+</ParamField>
+
+**Examples:**
+
+```bash
+ironclaw memory read MEMORY.md
+ironclaw memory read notes/project-ideas.md
+ironclaw memory read daily/2024-03-01.md
+```
+
+**Output:**
+
+```bash
+# Core Memory
+
+Key facts and information the agent should always remember.
+
+## User Profile
+- Name: Alice
+- Timezone: America/New_York
+- Preferences: Concise summaries, technical details
+
+## Active Projects
+1. Website redesign (due March 15)
+2. API v2 migration (in progress)
+3. Documentation updates (ongoing)
+
+## Important Contacts
+- Bob (teammate): bob@example.com
+- Charlie (manager): charlie@example.com
+```
+
+<Note>
+  If the file doesn't exist, you'll get an error: `File not found: notes/missing.md`
+</Note>
+
+### write
+
+Write or append content to a workspace file:
+
+```bash
+ironclaw memory write <PATH> [CONTENT] [OPTIONS]
+```
+
+<ParamField path="path" type="string" required>
+  File path to write (e.g., "notes/idea.md").
+</ParamField>
+
+<ParamField path="content" type="string">
+  Content to write. If omitted, reads from stdin.
+</ParamField>
+
+<ParamField path="-a, --append" type="flag">
+  Append to the file instead of overwriting.
+</ParamField>
+
+**Examples:**
+
+```bash
+# Write from command line
+ironclaw memory write notes/quick-note.md "Remember to follow up on that email"
+
+# Write from stdin
+echo "# New Note\n\nSome content here" | ironclaw memory write notes/new.md
+
+# Append to existing file
+ironclaw memory write daily/2024-03-01.md "\n- Completed PR review" --append
+
+# Write multi-line content
+ironclaw memory write notes/todo.md "$(cat <<EOF
+# TODO List
+
+- [ ] Finish documentation
+- [ ] Review PR #42
+- [ ] Update dependencies
+EOF
+)"
+```
+
+**Output:**
+
+```bash
+Wrote to notes/quick-note.md
+```
+
+or
+
+```bash
+Appended to daily/2024-03-01.md
+```
+
+<Warning>
+  Writing without `--append` will overwrite the entire file. Use append mode to add content to existing files.
+</Warning>
+
+### tree
+
+Show workspace directory structure:
+
+```bash
+ironclaw memory tree [PATH] [OPTIONS]
+```
+
+<ParamField path="path" type="string" default="">
+  Root path to start from. Defaults to workspace root.
+</ParamField>
+
+<ParamField path="-d, --depth" type="integer" default="3">
+  Maximum depth to traverse.
+</ParamField>
+
+**Examples:**
+
+```bash
+ironclaw memory tree
+ironclaw memory tree notes
+ironclaw memory tree --depth 2
+```
+
+**Output:**
+
+```bash
+./
+├── MEMORY.md
+├── IDENTITY.md
+├── HEARTBEAT.md
+├── USER.md
+├── AGENTS.md
+├── SOUL.md
+├── daily/
+│   ├── 2024-02-28.md
+│   ├── 2024-03-01.md
+│   └── 2024-03-04.md
+├── notes/
+│   ├── project-ideas.md
+│   ├── quick-note.md
+│   └── meetings/
+│       ├── 2024-03-01-standup.md
+│       └── 2024-02-26-planning.md
+└── code/
+    ├── snippets.md
+    └── examples/
+        ├── api-usage.md
+        └── config-examples.md
+```
+
+### status
+
+Show workspace status and health:
+
+```bash
+ironclaw memory status
+```
+
+**Output:**
+
+```bash
+Workspace Status
+  User:        default
+  Files:       42
+  Directories: 8
+
+  Identity files:
+    [+] MEMORY.md
+    [+] HEARTBEAT.md
+    [+] IDENTITY.md
+    [+] SOUL.md
+    [+] AGENTS.md
+    [+] USER.md
+```
+
+**Legend:**
+- `[+]` - File exists
+- `[-]` - File missing
+
+<Note>
+  Identity files are special documents that define the agent's personality, goals, and memory. Missing files will be created automatically when the agent runs.
+</Note>
+
+## Workspace Structure
+
+The workspace follows a recommended structure:
+
+```
+~/.ironclaw/workspace/
+├── MEMORY.md           # Core facts and memory
+├── IDENTITY.md         # Agent personality and traits
+├── HEARTBEAT.md        # Activity log and reflections
+├── USER.md             # User profile and preferences
+├── AGENTS.md           # Instructions for AI agents
+├── SOUL.md             # Long-term goals and values
+├── daily/              # Daily notes and journals
+│   └── YYYY-MM-DD.md
+├── notes/              # General notes
+│   ├── meetings/
+│   ├── ideas/
+│   └── ...md
+├── code/               # Code snippets and examples
+└── ...                 # Custom directories
+```
+
+## Search Modes
+
+The search command uses hybrid search combining:
+
+1. **Full-text search:** Exact keyword matching with BM25 scoring
+2. **Semantic search:** Meaning-based matching using embeddings (if enabled)
+
+Results are ranked by combined relevance score.
+
+<Info>
+  To enable semantic search, set `embeddings.enabled = true` in your config and provide an `OPENAI_API_KEY`.
+</Info>
+
+## Examples
+
+### Create a daily journal entry
+
+```bash
+ironclaw memory write daily/$(date +%Y-%m-%d).md "$(cat <<EOF
+# $(date +%Y-%m-%d)
+
+## Accomplishments
+- Completed feature X
+- Fixed bug Y
+
+## Notes
+- Meeting with Bob about project Z
+
+## Tomorrow
+- [ ] Review PR #42
+- [ ] Update docs
+EOF
+)"
+```
+
+### Search for TODO items
+
+```bash
+ironclaw memory search "TODO" --limit 20
+```
+
+### Backup all notes
+
+```bash
+ironclaw memory read notes/important.md > backup.md
+```
+
+### Check what the agent remembers
+
+```bash
+ironclaw memory read MEMORY.md
+```
+
+### Append to activity log
+
+```bash
+ironclaw memory write HEARTBEAT.md "\n- $(date): Deployed new version" --append
+```
+
+## Database Backend
+
+Workspace data is stored in your configured database:
+
+- **PostgreSQL:** `workspace_documents` table with full-text search and pgvector for embeddings
+- **libSQL/Turso:** `workspace_documents` table with FTS5 full-text index
+
+Search indexes are created automatically on first use.
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw run" icon="play" href="/cli/run">
+    Start the agent with full workspace access
+  </Card>
+  
+  <Card title="ironclaw status" icon="heart" href="/cli/status">
+    View workspace status
+  </Card>
+</CardGroup>

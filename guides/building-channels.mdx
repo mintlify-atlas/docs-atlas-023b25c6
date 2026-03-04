@@ -1,0 +1,534 @@
+---
+title: Building WASM Channels
+description: Guide for creating messaging platform channels as WASM components
+---
+
+Channels are WASM components that handle communication with external messaging platforms (Telegram, WhatsApp, Slack, etc.). They run in a sandboxed environment and communicate with the host via the WIT interface.
+
+## Overview
+
+A channel:
+- Receives messages from a messaging platform (webhook or polling)
+- Emits messages to the agent for processing
+- Sends agent responses back to the platform
+- Runs isolated with explicit capabilities
+
+## Directory Structure
+
+```
+channels-src/my-channel/
+├── Cargo.toml
+├── src/
+│   └── lib.rs
+└── my-channel.capabilities.json
+```
+
+After building, deploy to:
+
+```
+~/.ironclaw/channels/
+├── my-channel.wasm
+└── my-channel.capabilities.json
+```
+
+## Step 1: Create Cargo.toml
+
+```toml
+[package]
+name = "my-channel"
+version = "0.1.0"
+edition = "2021"
+description = "My messaging platform channel for IronClaw"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.36"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+codegen-units = 1
+```
+
+## Step 2: Implement the Channel
+
+### Required Imports
+
+```rust
+wit_bindgen::generate!({
+    world: "sandboxed-channel",
+    path: "../../wit/channel.wit",
+});
+
+use serde::{Deserialize, Serialize};
+use exports::near::agent::channel::{
+    AgentResponse, ChannelConfig, Guest, HttpEndpointConfig,
+    IncomingHttpRequest, OutgoingHttpResponse, PollConfig,
+};
+use near::agent::channel_host::{self, EmittedMessage};
+```
+
+### Implement the Guest Trait
+
+```rust
+struct MyChannel;
+
+impl Guest for MyChannel {
+    /// Called once when the channel starts.
+    fn on_start(config_json: String) -> Result<ChannelConfig, String> {
+        let config: MyConfig = serde_json::from_str(&config_json)
+            .unwrap_or_default();
+
+        Ok(ChannelConfig {
+            display_name: "My Channel".to_string(),
+            http_endpoints: vec![
+                HttpEndpointConfig {
+                    path: "/webhook/my-channel".to_string(),
+                    methods: vec!["POST".to_string()],
+                    require_secret: true,
+                },
+            ],
+            poll: None,  // Or Some(PollConfig { interval_ms, enabled })
+        })
+    }
+
+    /// Handle incoming HTTP requests (webhooks).
+    fn on_http_request(req: IncomingHttpRequest) -> OutgoingHttpResponse {
+        // Validate webhook secret (host validates, but defense in depth)
+        if !req.secret_validated {
+            channel_host::log(channel_host::LogLevel::Warn, "Invalid secret");
+            return OutgoingHttpResponse {
+                status_code: 401,
+                headers: vec![],
+                body: b"Unauthorized".to_vec(),
+            };
+        }
+
+        // Parse webhook payload
+        let payload: WebhookPayload = match serde_json::from_slice(&req.body) {
+            Ok(p) => p,
+            Err(e) => {
+                return OutgoingHttpResponse {
+                    status_code: 400,
+                    headers: vec![],
+                    body: format!("Bad request: {}", e).into_bytes(),
+                };
+            }
+        };
+
+        // Process messages
+        for message in payload.messages {
+            // Store routing info in metadata
+            let metadata = MessageMetadata {
+                chat_id: message.chat_id.clone(),
+                sender_id: message.from.clone(),
+                message_id: message.id.clone(),
+            };
+
+            // Emit to agent
+            channel_host::emit_message(&EmittedMessage {
+                user_id: message.from,
+                user_name: Some(message.sender_name),
+                content: message.text,
+                thread_id: None,
+                metadata_json: serde_json::to_string(&metadata).unwrap_or_default(),
+            });
+        }
+
+        OutgoingHttpResponse {
+            status_code: 200,
+            headers: vec![],
+            body: b"OK".to_vec(),
+        }
+    }
+
+    /// Called periodically if polling is enabled.
+    fn on_poll() {
+        // Read last offset
+        let offset = channel_host::workspace_read("state/offset")
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(0);
+
+        // Fetch updates
+        let url = format!(
+            "https://api.example.com/updates?offset={}&token={{MY_CHANNEL_TOKEN}}",
+            offset
+        );
+        let response = match channel_host::http_request("GET", &url, "{}", None) {
+            Ok(r) => r,
+            Err(e) => {
+                channel_host::log(channel_host::LogLevel::Error, &e);
+                return;
+            }
+        };
+
+        // Parse and emit messages
+        let updates: Updates = match serde_json::from_str(&response) {
+            Ok(u) => u,
+            Err(_) => return,
+        };
+
+        let mut new_offset = offset;
+        for update in updates.messages {
+            if update.id >= new_offset {
+                new_offset = update.id + 1;
+            }
+            emit_message(update);
+        }
+
+        // Save new offset
+        if new_offset != offset {
+            let _ = channel_host::workspace_write(
+                "state/offset",
+                &new_offset.to_string(),
+            );
+        }
+    }
+
+    /// Send a response back to the messaging platform.
+    fn on_respond(response: AgentResponse) -> Result<(), String> {
+        // Parse metadata from ORIGINAL message
+        let metadata: MessageMetadata = serde_json::from_str(&response.metadata_json)
+            .map_err(|e| format!("Invalid metadata: {}", e))?;
+
+        // Build API request
+        let body = serde_json::json!({
+            "chat_id": metadata.chat_id,
+            "text": response.content,
+        });
+
+        // Send (credentials auto-injected)
+        let url = "https://api.example.com/bot{MY_CHANNEL_TOKEN}/sendMessage";
+        channel_host::http_request(
+            "POST",
+            url,
+            r#"{"Content-Type": "application/json"}"#,
+            Some(&body.to_string()),
+        )?;
+
+        Ok(())
+    }
+
+    /// Called when channel is shutting down.
+    fn on_shutdown() {
+        channel_host::log(channel_host::LogLevel::Info, "Shutting down");
+    }
+}
+
+export!(MyChannel);
+```
+
+## Critical Pattern: Metadata Flow
+
+**The most important pattern**: Store routing info in metadata so responses can be delivered.
+
+```rust
+// When receiving a message:
+#[derive(Serialize, Deserialize)]
+struct MessageMetadata {
+    chat_id: String,
+    sender_id: String,  // CRITICAL: Store sender!
+    message_id: String,
+}
+
+// In on_http_request or on_poll:
+let metadata = MessageMetadata {
+    chat_id: message.chat.id.clone(),
+    sender_id: message.from.clone(),  // Store who sent it
+    message_id: message.id.clone(),
+};
+
+channel_host::emit_message(&EmittedMessage {
+    user_id: message.from.clone(),
+    user_name: Some(name),
+    content: text,
+    thread_id: None,
+    metadata_json: serde_json::to_string(&metadata).unwrap_or_default(),
+});
+
+// In on_respond:
+fn on_respond(response: AgentResponse) -> Result<(), String> {
+    // Use metadata from the ORIGINAL message
+    let metadata: MessageMetadata = serde_json::from_str(&response.metadata_json)?;
+
+    // sender_id becomes the recipient!
+    send_message(metadata.chat_id, metadata.sender_id, response.content);
+}
+```
+
+## Step 3: Create Capabilities File
+
+Create `my-channel.capabilities.json`:
+
+```json
+{
+  "type": "channel",
+  "name": "my-channel",
+  "description": "My messaging platform channel",
+  "setup": {
+    "required_secrets": [
+      {
+        "name": "my_channel_token",
+        "prompt": "Enter your bot token",
+        "validation": "^[A-Za-z0-9_-]+$"
+      },
+      {
+        "name": "my_channel_webhook_secret",
+        "prompt": "Webhook secret (leave empty to auto-generate)",
+        "optional": true,
+        "auto_generate": { "length": 32 }
+      }
+    ],
+    "validation_endpoint": "https://api.example.com/verify?token={my_channel_token}"
+  },
+  "capabilities": {
+    "http": {
+      "allowlist": [
+        { "host": "api.example.com", "path_prefix": "/" }
+      ],
+      "rate_limit": {
+        "requests_per_minute": 60,
+        "requests_per_hour": 1000
+      }
+    },
+    "secrets": {
+      "allowed_names": ["my_channel_*"]
+    },
+    "channel": {
+      "allowed_paths": ["/webhook/my-channel"],
+      "allow_polling": true,
+      "workspace_prefix": "channels/my-channel/",
+      "emit_rate_limit": {
+        "messages_per_minute": 100,
+        "messages_per_hour": 5000
+      },
+      "webhook": {
+        "secret_header": "X-Webhook-Secret",
+        "secret_name": "my_channel_webhook_secret"
+      }
+    }
+  },
+  "config": {
+    "poll_interval_ms": 30000
+  }
+}
+```
+
+## Building and Deploying
+
+### Build
+
+```bash
+rustup target add wasm32-wasip2
+cd channels-src/my-channel
+cargo build --release --target wasm32-wasip2
+```
+
+### Install
+
+```bash
+mkdir -p ~/.ironclaw/channels
+cp target/wasm32-wasip2/release/my_channel.wasm ~/.ironclaw/channels/my-channel.wasm
+cp my-channel.capabilities.json ~/.ironclaw/channels/
+```
+
+### Enable
+
+```bash
+ironclaw onboard  # Select and configure the channel
+```
+
+## Host Functions Available
+
+### Logging
+
+```rust
+channel_host::log(LogLevel::Info, "Message");
+channel_host::log(LogLevel::Error, "Error occurred");
+```
+
+### Time
+
+```rust
+let now = channel_host::now_millis();
+```
+
+### Workspace
+
+```rust
+// Read state (scoped to channel namespace)
+let data = channel_host::workspace_read("state/offset");
+
+// Write state
+channel_host::workspace_write("state/offset", "12345")?;
+```
+
+### HTTP Requests
+
+```rust
+// Credentials auto-injected from placeholders
+let url = "https://api.example.com/bot{MY_CHANNEL_TOKEN}/method";
+let response = channel_host::http_request("POST", url, &headers, Some(&body))?;
+```
+
+### Emit Message to Agent
+
+```rust
+channel_host::emit_message(&EmittedMessage {
+    user_id: "user123".to_string(),
+    user_name: Some("John Doe".to_string()),
+    content: "Hello, agent!".to_string(),
+    thread_id: None,
+    metadata_json: serde_json::to_string(&metadata).unwrap_or_default(),
+});
+```
+
+## Common Patterns
+
+### Webhook Secret Validation
+
+The host validates automatically, but check `req.secret_validated`:
+
+```rust
+fn on_http_request(req: IncomingHttpRequest) -> OutgoingHttpResponse {
+    if !req.secret_validated {
+        channel_host::log(LogLevel::Warn, "Invalid webhook secret");
+        return OutgoingHttpResponse {
+            status_code: 401,
+            headers: vec![],
+            body: b"Unauthorized".to_vec(),
+        };
+    }
+    // Process request
+}
+```
+
+### Polling with Offset Tracking
+
+```rust
+const OFFSET_PATH: &str = "state/last_offset";
+
+fn on_poll() {
+    let offset = channel_host::workspace_read(OFFSET_PATH)
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+
+    let updates = fetch_updates(offset);
+
+    let mut new_offset = offset;
+    for update in updates {
+        if update.id >= new_offset {
+            new_offset = update.id + 1;
+        }
+        emit_message(update);
+    }
+
+    if new_offset != offset {
+        let _ = channel_host::workspace_write(OFFSET_PATH, &new_offset.to_string());
+    }
+}
+```
+
+### Bot Message Filtering
+
+Skip bot messages to prevent loops:
+
+```rust
+if sender.is_bot {
+    return;  // Don't respond to bots
+}
+```
+
+### Status Message Filtering
+
+Skip status updates:
+
+```rust
+if !payload.statuses.is_empty() && payload.messages.is_empty() {
+    return;  // Only status updates, no actual messages
+}
+```
+
+## Testing
+
+Add tests to `lib.rs`:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_webhook() {
+        let json = r#"{"messages": [...]}"#;
+        let payload: WebhookPayload = serde_json::from_str(json).unwrap();
+        assert_eq!(payload.messages.len(), 1);
+    }
+
+    #[test]
+    fn test_metadata_roundtrip() {
+        let meta = MessageMetadata {
+            chat_id: "123".to_string(),
+            sender_id: "user456".to_string(),
+            message_id: "msg789".to_string(),
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        let parsed: MessageMetadata = serde_json::from_str(&json).unwrap();
+        assert_eq!(meta.chat_id, parsed.chat_id);
+    }
+}
+```
+
+## Troubleshooting
+
+### "byte index N is not a char boundary"
+
+Never slice strings by byte index! Use character-aware truncation:
+
+```rust
+// BAD: panics on multi-byte UTF-8
+let preview = &content[..50];
+
+// GOOD: safe truncation
+let preview: String = content.chars().take(50).collect();
+```
+
+### Credential Placeholders Not Replaced
+
+1. Check the secret name matches (lowercase with underscores)
+2. Verify the secret is in `allowed_names` in capabilities
+3. Check logs for "unresolved placeholders" warnings
+
+### Messages Not Routing to Responses
+
+Ensure `on_respond` uses the ORIGINAL message's metadata:
+
+```rust
+// response.metadata_json comes from the ORIGINAL emit_message call
+let metadata: MyMetadata = serde_json::from_str(&response.metadata_json)?;
+```
+
+## Supply Chain Security
+
+**Do not commit compiled WASM binaries.** They are a supply chain risk — the binary in a PR may not match the source.
+
+- Build channels from source: `cargo build`
+- The built binary is in `.gitignore`
+- CI should run `cargo build` to produce releases
+
+## Examples
+
+Check the bundled channel:
+
+- `channels-src/telegram/` - Full Telegram implementation with polling and webhooks
+
+## Next Steps
+
+- Set up [Telegram channel](/guides/telegram-setup)
+- Learn about [WASM tools](/guides/building-tools)
+- Explore [MCP servers](/guides/mcp-servers) for external integrations

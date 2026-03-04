@@ -1,0 +1,125 @@
+---
+title: Design Philosophy
+description: Core principles guiding IronClaw's development
+---
+
+## Your AI Should Work for You, Not Against You
+
+IronClaw is built on a simple principle: **your AI assistant should work for you, not against you**.
+
+In a world where AI systems are increasingly opaque about data handling and aligned with corporate interests, IronClaw takes a different approach:
+
+<CardGroup cols={2}>
+  <Card title="Your Data Stays Yours" icon="lock">
+    All information is stored locally, encrypted, and never leaves your control. No cloud storage, no data harvesting, no vendor lock-in.
+  </Card>
+  
+  <Card title="Transparency by Design" icon="eye">
+    Open source, auditable, no hidden telemetry or data harvesting. You can inspect every line of code and verify exactly what IronClaw does.
+  </Card>
+  
+  <Card title="Self-Expanding Capabilities" icon="wrench">
+    Build new tools on the fly without waiting for vendor updates. IronClaw can create WASM tools dynamically based on your needs.
+  </Card>
+  
+  <Card title="Defense in Depth" icon="shield">
+    Multiple security layers protect against prompt injection and data exfiltration. Security is not an afterthought but a core design principle.
+  </Card>
+</CardGroup>
+
+## Trustworthy AI
+
+IronClaw is the AI assistant you can actually trust with your personal and professional life. Every design decision prioritizes:
+
+### Local-First Data Storage
+
+All data is stored in your own PostgreSQL database with encryption at rest. Your conversations, memory, and credentials never leave your machine unless you explicitly choose to share them.
+
+### Security as a Foundation
+
+Security isn't a feature layer - it's built into the architecture from day one:
+
+- **WASM Sandbox**: Untrusted tools run in isolated WebAssembly containers
+- **Credential Protection**: Secrets are never exposed to tools; injected at the host boundary
+- **Prompt Injection Defense**: Pattern detection, content sanitization, and policy enforcement
+- **Endpoint Allowlisting**: HTTP requests only to explicitly approved hosts
+
+### Open and Auditable
+
+Every component is open source under MIT or Apache 2.0 licenses. You can:
+
+- Review the source code
+- Build from source
+- Verify no telemetry or tracking
+- Audit security controls
+- Contribute improvements
+
+### Self-Expanding Without Limits
+
+Unlike closed AI assistants that require vendor approval for new features, IronClaw lets you:
+
+- Build custom tools dynamically
+- Connect to MCP (Model Context Protocol) servers
+- Add new capabilities without restarting
+- Extend functionality through plugins
+
+## Design Principles
+
+<AccordionGroup>
+  <Accordion title="Fail Closed, Not Open">
+    When security controls are missing or uncertain, IronClaw defaults to denying access rather than permitting it. Empty allowlists deny all requests. Missing authentication fails the request.
+  </Accordion>
+  
+  <Accordion title="Defense in Depth">
+    Multiple overlapping security layers protect against threats. Even if one layer fails, others provide backup protection. For example, HTTP requests pass through allowlist validation, credential injection controls, and leak detection.
+  </Accordion>
+  
+  <Accordion title="Zero Trust Architecture">
+    IronClaw treats all components as potentially compromised:
+    - WASM tools are sandboxed with capability-based permissions
+    - Docker containers run as non-root with dropped capabilities
+    - External webhooks require shared secret authentication
+    - LLM output is sanitized before execution
+  </Accordion>
+  
+  <Accordion title="Minimal Privilege">
+    Every component receives only the permissions it needs:
+    - Per-job bearer tokens for container workers
+    - Per-tool credential grants for secrets access
+    - Scoped allowlists for network access
+    - Read-only filesystems in sandboxes
+  </Accordion>
+  
+  <Accordion title="Observability Built-In">
+    Full audit trails for security analysis:
+    - All tool executions logged
+    - LLM calls tracked with costs
+    - Job events persisted to database
+    - Real-time SSE streaming for monitoring
+  </Accordion>
+</AccordionGroup>
+
+## Rust-First Implementation
+
+IronClaw is written in Rust to provide:
+
+- **Memory Safety**: No buffer overflows, use-after-free, or data races
+- **Performance**: Native speed without garbage collection pauses
+- **Reliability**: Strong type system catches bugs at compile time
+- **Single Binary**: No runtime dependencies, easy deployment
+
+<Note>
+IronClaw is inspired by [OpenClaw](https://github.com/openclaw/openclaw) but reimplemented in Rust with a security-first design. See [FEATURE_PARITY.md](https://github.com/nearai/ironclaw/blob/main/FEATURE_PARITY.md) for the complete comparison.
+</Note>
+
+## Architecture Goals
+
+The architecture is designed to achieve:
+
+1. **Always Available**: Multi-channel support (REPL, HTTP, Telegram, Slack, web gateway)
+2. **Parallel Execution**: Handle multiple jobs concurrently with isolated contexts
+3. **Persistent Memory**: Hybrid search (full-text + vector) for context retention
+4. **Self-Repair**: Automatic detection and recovery from stuck operations
+5. **Background Automation**: Cron schedules, event triggers, and webhook handlers
+
+<Check>IronClaw prioritizes your control and privacy while maintaining the power and flexibility of a modern AI assistant.</Check>

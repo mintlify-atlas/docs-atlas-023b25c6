@@ -1,0 +1,443 @@
+---
+title: Security Model
+description: Defense-in-depth security architecture protecting your data
+---
+
+## Security Philosophy
+
+IronClaw implements a **zero-trust, defense-in-depth** security architecture. Every component is treated as potentially compromised, with multiple overlapping layers of protection.
+
+<Warning>Security is not a feature layer - it's built into the architecture from day one.</Warning>
+
+## Threat Model
+
+IronClaw operates across four trust boundaries:
+
+| Boundary | Trust Level | Protection |
+|----------|-------------|------------|
+| **Local user** | Fully trusted | TUI, web gateway (loopback), CLI commands |
+| **Browser client** | Authenticated | Bearer token, CORS, Origin validation, CSRF protection |
+| **Docker containers** | Untrusted (sandboxed) | Per-job tokens, allowlisted egress, dropped capabilities |
+| **External services** | Untrusted | Shared secret authentication for webhooks |
+
+### Key Assumptions
+
+- The local machine is single-user
+- Docker containers are adversarial
+- Webhook senders must prove knowledge of shared secret
+- MCP server URLs are operator-configured (trusted destinations)
+- LLM output may contain prompt injection attempts
+
+## WASM Sandbox
+
+All untrusted tools run in isolated WebAssembly containers with strict capability-based permissions.
+
+### Isolation Model
+
+```
+WASM ──► Allowlist ──► Leak Scan ──► Credential ──► Execute ──► Leak Scan ──► WASM
+         Validator     (request)     Injector       Request     (response)
+```
+
+<Info>**Source**: `src/tools/wasm/`, `src/sandbox/`</Info>
+
+### Capability-Based Permissions
+
+Tools must explicitly declare capabilities in `<tool>.capabilities.json`:
+
+<CodeGroup>
+```json Example Tool Capabilities
+{
+  "http": {
+    "allowed_hosts": [
+      "api.github.com",
+      "*.googleapis.com"
+    ],
+    "allowed_methods": ["GET", "POST"],
+    "require_https": true
+  },
+  "secrets": {
+    "allowed_secrets": ["github_token", "google_api_key"]
+  },
+  "tool_invocation": {
+    "allowed_tools": ["http", "file_read"]
+  }
+}
+```
+</CodeGroup>
+
+**Permission Types**:
+
+<AccordionGroup>
+  <Accordion title="HTTP Access">
+    - Host allowlist (exact or wildcard matching)
+    - Path prefix restrictions
+    - HTTP method filtering
+    - HTTPS requirement
+    - Userinfo in URLs rejected (prevents `user:pass@host` bypass)
+    - Path traversal blocked (`../`, `%2e%2e/`)
+  </Accordion>
+  
+  <Accordion title="Secrets Access">
+    - Explicit secret name allowlist
+    - Secrets injected at host boundary
+    - WASM code never sees actual values
+    - Leak detection on all requests/responses
+  </Accordion>
+  
+  <Accordion title="Tool Invocation">
+    - Explicit tool name allowlist
+    - Prevents tool-to-tool privilege escalation
+    - Circular invocation prevention
+  </Accordion>
+</AccordionGroup>
+
+### Endpoint Allowlisting
+
+<Info>**Source**: `src/tools/wasm/allowlist.rs`</Info>
+
+HTTP requests are validated against a multi-layer allowlist:
+
+1. **Host Matching**: Exact domain or wildcard pattern (`*.example.com`)
+2. **Path Prefix**: Request path must start with allowed prefix
+3. **Method Restriction**: Only declared HTTP methods permitted
+4. **Scheme Validation**: HTTPS required by default
+5. **URL Normalization**: Percent-encoding validation, path traversal detection
+
+**Fail-Closed Default**: Empty allowlist denies all requests.
+
+### Resource Limits
+
+WASM tools are subject to runtime constraints:
+
+- **Memory**: Configurable limit (default varies by tool)
+- **CPU**: Execution time limits
+- **Network**: Rate limiting per tool
+- **Disk**: No filesystem access (in-memory only)
+
+## Credential Protection
+
+Secrets are never exposed to untrusted code. IronClaw uses **credential injection** at the host boundary.
+
+### Secret Storage
+
+<Info>**Source**: `src/secrets/`</Info>
+
+- All secrets encrypted with AES-256-GCM
+- Encryption keys stored in system keychain (OS-specific)
+- Per-user secret namespaces
+- Metadata tracked in database (name, created, updated)
+- Actual values never logged or persisted unencrypted
+
+### Credential Injection
+
+<Info>**Source**: `src/tools/wasm/credential_injector.rs`, `src/sandbox/proxy/http.rs`</Info>
+
+Secrets are injected into HTTP requests at the host boundary:
+
+**Injection Methods**:
+- `Authorization: Bearer {token}` header
+- `Authorization: Basic {base64}` header
+- Custom headers (e.g., `X-API-Key: {secret}`)
+- Query parameters (e.g., `?api_key={secret}`)
+
+**Security Controls**:
+- Tool must declare allowed secrets
+- Secrets resolved at request time from encrypted store
+- Leak detection scans request before sending
+- Leak detection scans response before returning to tool
+
+### Leak Detection
+
+<Info>**Source**: `src/safety/leak_detector.rs`</Info>
+
+All HTTP traffic is scanned for secret exfiltration attempts:
+
+- **Request Scan**: Before sending outbound requests
+- **Response Scan**: Before returning responses to WASM
+- **Multi-Pattern Matching**: Aho-Corasick algorithm for efficiency
+- **Secret Patterns**: Exact match and regex-based detection
+
+**Actions on Detection**:
+1. Block the request/response
+2. Log security event
+3. Return error to caller
+4. Optional notification to operator
+
+## Prompt Injection Defense
+
+External content (tool outputs, webhook payloads, user messages from untrusted sources) passes through multiple security layers.
+
+<Info>**Source**: `src/safety/`</Info>
+
+### Detection Layers
+
+<Steps>
+  <Step title="Pattern Detection">
+    Regex-based detection of common injection patterns:
+    - Role manipulation (`System:`, `Assistant:`, `You are now`)
+    - Instruction override (`Ignore previous`, `Disregard all`)
+    - Data exfiltration attempts (`Send to`, `POST to`)
+    - Jailbreak phrases (`DAN mode`, `Developer override`)
+  </Step>
+  
+  <Step title="Content Sanitization">
+    Escape or remove dangerous content:
+    - Strip control characters
+    - Escape backticks and code blocks
+    - Normalize whitespace
+    - Remove embedded instructions
+  </Step>
+  
+  <Step title="Policy Enforcement">
+    Apply severity-based actions:
+    - **Block**: Reject content entirely
+    - **Warn**: Log warning, allow with caution flag
+    - **Review**: Flag for human review
+    - **Sanitize**: Clean content automatically
+  </Step>
+  
+  <Step title="Context Wrapping">
+    Wrap tool outputs in XML-style tags for LLM safety:
+    ```xml
+    <tool_output name="http" url="https://example.com">
+    [content]
+    </tool_output>
+    ```
+    This makes it harder for injected content to escape the tool context.
+  </Step>
+</Steps>
+
+### Safety Policies
+
+Policies are defined in the configuration:
+
+```yaml Safety Policy Example
+safety:
+  policies:
+    - pattern: "(?i)ignore (previous|all) instructions?"
+      severity: block
+      action: reject
+    - pattern: "(?i)(you are|act as|roleplay).*system"
+      severity: warn
+      action: sanitize
+```
+
+## Docker Container Security
+
+Sandbox containers run with defense-in-depth hardening:
+
+<Info>**Source**: `src/sandbox/container.rs`, `src/NETWORK_SECURITY.md`</Info>
+
+### Container Configuration
+
+<CardGroup cols={2}>
+  <Card title="Capabilities" icon="shield-halved">
+    **Drop ALL capabilities**, add only CHOWN. Prevents privilege escalation, raw sockets, kernel module loading, etc.
+  </Card>
+  
+  <Card title="User Isolation" icon="user">
+    Run as **non-root** (UID 1000:1000). Combined with read-only filesystem, limits attack surface.
+  </Card>
+  
+  <Card title="Read-Only Filesystem" icon="lock">
+    Root filesystem is **read-only** (except tmpfs mounts). Prevents persistence of malicious code.
+  </Card>
+  
+  <Card title="Network Isolation" icon="network-wired">
+    **Bridge mode** with HTTP proxy. All egress traffic routed through allowlist-enforced proxy.
+  </Card>
+</CardGroup>
+
+### Security Options
+
+```bash Container Security Settings
+--cap-drop=ALL
+--cap-add=CHOWN
+--security-opt=no-new-privileges:true
+--read-only
+--user=1000:1000
+--network=bridge
+--tmpfs /tmp:size=512m
+--tmpfs /home/sandbox/.cargo/registry:size=1g
+```
+
+### HTTP Proxy for Egress
+
+<Info>**Source**: `src/sandbox/proxy/http.rs`</Info>
+
+All container HTTP traffic is routed through a sandbox proxy:
+
+**Proxy Features**:
+- Binds to **127.0.0.1 only** (not accessible from network)
+- Domain allowlist enforcement
+- **Empty allowlist = deny all** (fail-closed)
+- HTTPS tunneling (CONNECT) with 30-minute timeout
+- Credential injection for HTTP (not HTTPS - by design)
+- Hop-by-hop header filtering
+
+**Default Allowed Domains**:
+- LLM provider endpoints (NEAR AI, OpenAI, Anthropic, etc.)
+- Package registries (PyPI, npm, crates.io)
+- Version control (GitHub, GitLab)
+- Configurable via `SANDBOX_EXTRA_DOMAINS`
+
+### Timeout and Cleanup
+
+Containers are subject to strict lifecycle management:
+
+- **Execution Timeout**: Configurable per job (default 600s)
+- **Forced Stop**: Container stopped after timeout
+- **Auto-Remove**: Container automatically deleted after execution
+- **Output Limits**: Stdout/stderr capped to prevent log bombs
+- **Token Revocation**: Per-job bearer token revoked on cleanup
+
+## Network Security
+
+IronClaw has multiple network-facing surfaces with layered authentication.
+
+<Info>**Source**: `src/NETWORK_SECURITY.md` (full inventory)</Info>
+
+### Web Gateway
+
+**Bind Address**: `127.0.0.1:3000` (default, loopback only)
+
+**Authentication**:
+- Bearer token in `Authorization` header
+- Query parameter `?token=` for SSE (constant-time comparison)
+- Random hex token generated if not configured
+
+**Protections**:
+- CORS allowlist (two origins: bind IP and localhost)
+- WebSocket Origin validation
+- Rate limiting (30 req/60s for chat endpoint)
+- Body limit (1 MB max)
+- Security headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`)
+
+### HTTP Webhook Server
+
+**Bind Address**: `0.0.0.0:8080` (default, all interfaces)
+
+<Warning>Webhook server binds to all interfaces by default for external service access. Use firewall rules to restrict access.</Warning>
+
+**Authentication**:
+- Shared secret in JSON body (`secret` field)
+- Constant-time comparison via `subtle::ConstantTimeEq`
+- Required to start server (fail if not configured)
+
+**Protections**:
+- Content-Type validation (`application/json` only)
+- Rate limiting (60 req/min)
+- Body limit (64 KB max)
+- Message content limit (32 KB max)
+- CSRF protection (secret in body, not cookie/header)
+
+### Orchestrator Internal API
+
+**Bind Address**: `127.0.0.1:50051` (macOS/Windows), `0.0.0.0:50051` (Linux)
+
+**Authentication**:
+- Per-job bearer token (32 bytes, hex-encoded)
+- Constant-time comparison
+- Job ID extracted from URL path
+- Token scoped to specific job (cannot access other jobs)
+
+**Protections**:
+- Ephemeral tokens (in-memory only, never persisted)
+- Token revocation on container cleanup
+- Credential grants scoped to specific secrets
+- No rate limiting (tokens are per-job scoped)
+
+## Built-in Tool SSRF Protections
+
+The built-in `http` tool has comprehensive SSRF defenses:
+
+<Info>**Source**: `src/tools/builtin/http.rs`</Info>
+
+<CardGroup cols={2}>
+  <Card title="HTTPS Only" icon="lock">
+    Rejects `http://` URLs. All requests must use TLS.
+  </Card>
+  
+  <Card title="Localhost Blocked" icon="ban">
+    Rejects `localhost` and `*.localhost` domains.
+  </Card>
+  
+  <Card title="Private IP Blocked" icon="network-wired">
+    Blocks RFC 1918, loopback, link-local, multicast, unspecified addresses.
+  </Card>
+  
+  <Card title="Cloud Metadata Blocked" icon="cloud">
+    Blocks `169.254.169.254` (AWS/GCP metadata endpoint).
+  </Card>
+  
+  <Card title="DNS Rebinding Protection" icon="shield">
+    Resolves hostname and checks **all IPs** against blocklist.
+  </Card>
+  
+  <Card title="Redirect Blocking" icon="arrows-turn-to-dots">
+    Returns error on 3xx responses (prevents SSRF via redirect).
+  </Card>
+</CardGroup>
+
+**Additional Controls**:
+- Response size limit (5 MB max)
+- 30-second timeout
+- Outbound leak scan (URL, headers, body)
+- Requires user approval before execution
+
+## Data Protection
+
+All data stays on your machine with strong encryption:
+
+<CardGroup cols={2}>
+  <Card title="Local Storage" icon="database">
+    All data stored in your PostgreSQL database. No cloud storage, no vendor access.
+  </Card>
+  
+  <Card title="Encryption at Rest" icon="key">
+    Secrets encrypted with AES-256-GCM. Keys stored in OS keychain.
+  </Card>
+  
+  <Card title="No Telemetry" icon="eye-slash">
+    Zero telemetry, analytics, or data sharing. Open source, auditable.
+  </Card>
+  
+  <Card title="Audit Logs" icon="list">
+    Full audit trail of tool executions, LLM calls, job events. Queryable via database.
+  </Card>
+</CardGroup>
+
+## Security Best Practices
+
+When deploying IronClaw:
+
+<Steps>
+  <Step title="Use Strong Secrets">
+    Generate strong, random secrets for webhook authentication and gateway tokens. Use environment variables, never hardcode.
+  </Step>
+  
+  <Step title="Restrict Network Access">
+    - Web gateway: Keep on loopback (`127.0.0.1`)
+    - Webhook server: Use firewall rules to allow only known IPs
+    - Orchestrator: Block port 50051 from external access on Linux
+  </Step>
+  
+  <Step title="TLS Termination">
+    Front IronClaw with a reverse proxy (nginx, Caddy) or tunnel (Cloudflare, ngrok) for TLS.
+  </Step>
+  
+  <Step title="Review Tool Capabilities">
+    Audit WASM tool capabilities before loading. Verify allowlists and secret access.
+  </Step>
+  
+  <Step title="Monitor Audit Logs">
+    Regularly review job events, tool executions, and security findings in the database.
+  </Step>
+  
+  <Step title="Keep Docker Isolated">
+    Ensure Docker daemon is properly isolated and not accessible from untrusted networks.
+  </Step>
+</Steps>
+
+<Check>IronClaw's defense-in-depth architecture provides strong protection, but security is a shared responsibility. Follow best practices for deployment and configuration.</Check>

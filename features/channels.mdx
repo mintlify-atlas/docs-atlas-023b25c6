@@ -1,0 +1,376 @@
+---
+title: 'Multi-Channel Support'
+description: 'Connect to IronClaw through multiple interfaces simultaneously'
+icon: 'tower-broadcast'
+---
+
+IronClaw supports multiple input channels that can run simultaneously, allowing you to interact with your agent through different interfaces at once. Messages from any channel are unified into a single message stream for the agent to process.
+
+## Architecture
+
+The channel system uses a unified message format with channel-specific handling:
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                         ChannelManager                              │
+│                                                                     │
+│   ┌──────────────┐   ┌─────────────┐   ┌─────────────┐             │
+│   │ ReplChannel  │   │ HttpChannel │   │ WasmChannel │   ...       │
+│   └──────┬───────┘   └──────┬──────┘   └──────┬──────┘             │
+│          │                 │                 │                      │
+│          └─────────────────┴─────────────────┘                      │
+│                            │                                        │
+│                   select_all (futures)                              │
+│                            │                                        │
+│                            ▼                                        │
+│                     MessageStream                                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Available Channels
+
+<CardGroup cols={2}>
+  <Card title="REPL" icon="terminal">
+    Interactive command-line interface with markdown rendering, tab completion, and slash commands
+  </Card>
+  <Card title="HTTP Webhook" icon="webhook">
+    RESTful API for programmatic access with rate limiting and authentication
+  </Card>
+  <Card title="Signal" icon="message">
+    Private messaging via Signal protocol with pairing system and group support
+  </Card>
+  <Card title="Telegram" icon="telegram">
+    Integration with Telegram messenger (via WASM channels)
+  </Card>
+  <Card title="Web Gateway" icon="browser">
+    Browser-based UI with real-time updates via SSE and WebSocket
+  </Card>
+</CardGroup>
+
+## REPL Channel
+
+The REPL (Read-Eval-Print Loop) provides a rich terminal interface with:
+
+- **Line editing** via rustyline (history, tab completion)
+- **Markdown rendering** via termimad for formatted responses
+- **Slash commands** for control operations
+- **Tool approval cards** for interactive confirmation
+
+### Slash Commands
+
+```bash
+/help      # Show available commands
+/debug     # Toggle verbose output
+/quit      # Exit the REPL
+/undo      # Undo the last turn
+/redo      # Redo an undone turn
+/clear     # Clear conversation
+/compact   # Compact context window
+/new       # Start a new thread
+/interrupt # Stop current operation
+```
+
+### Example: Tool Approval
+
+```text
+┌ fetch_webpage requires approval ────────────────────────────
+│ Fetch content from a URL
+│
+│   url: "https://api.example.com/data"
+│   method: "GET"
+│
+│ yes (y) / always (a) / no (n)
+└─ req_a3f2 ─────────────────────────────────────────────────
+```
+
+### Starting the REPL
+
+```bash
+# Default mode (interactive)
+ironclaw
+
+# Single message mode
+ironclaw -m "What's the weather today?"
+
+# With debug mode enabled
+ironclaw --debug
+```
+
+<Info>
+The REPL uses `~/.ironclaw/history` to persist command history across sessions.
+</Info>
+
+## HTTP Webhook Channel
+
+Provides a RESTful API for sending messages programmatically:
+
+```http
+POST /webhook
+Content-Type: application/json
+
+{
+  "content": "Deploy the latest version",
+  "secret": "your-webhook-secret",
+  "wait_for_response": true,
+  "thread_id": "optional-thread-id"
+}
+```
+
+### Configuration
+
+```bash
+export HTTP_ENABLED=true
+export HTTP_PORT=8080
+export HTTP_WEBHOOK_SECRET="your-secret-here"
+export HTTP_USER_ID="http-client"
+```
+
+### Rate Limiting
+
+The HTTP channel enforces:
+- **60 requests per minute** per client
+- **64KB maximum** body size
+- **32KB maximum** content length
+- **100 maximum** pending wait-for-response requests
+
+### Response Format
+
+```json
+{
+  "message_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "accepted",
+  "response": "Deployment initiated successfully"
+}
+```
+
+## Signal Channel
+
+Connect via Signal Messenger using the signal-cli daemon:
+
+### Prerequisites
+
+```bash
+# Install signal-cli
+brew install signal-cli  # macOS
+apt install signal-cli   # Ubuntu
+
+# Link your device
+signal-cli -u +1234567890 link
+
+# Start daemon
+signal-cli -u +1234567890 daemon --http 127.0.0.1:8888
+```
+
+### Configuration
+
+```bash
+export SIGNAL_ENABLED=true
+export SIGNAL_HTTP_URL="http://127.0.0.1:8888"
+export SIGNAL_ACCOUNT="+1234567890"
+export SIGNAL_ALLOW_FROM="+10987654321"  # Allowed sender
+```
+
+### Pairing System
+
+The Signal channel supports a pairing flow for first-time users:
+
+```python
+# When an unknown sender messages the bot
+# They receive:
+"To pair with this bot, run: ironclaw pairing approve signal abc123"
+
+# The admin approves:
+ironclaw pairing approve signal abc123
+
+# The sender can now interact with the bot
+```
+
+### Group Chat Support
+
+Configure group access with fine-grained policies:
+
+```bash
+# DM policy: open, pairing, or allowlist (default)
+export SIGNAL_DM_POLICY="pairing"
+
+# Group policy: disabled, open, or allowlist (default)
+export SIGNAL_GROUP_POLICY="allowlist"
+
+# Allowed groups
+export SIGNAL_ALLOW_FROM_GROUPS="group-id-1,group-id-2"
+
+# Group sender allowlist (inherits from ALLOW_FROM if empty)
+export SIGNAL_GROUP_ALLOW_FROM="+1234567890"
+```
+
+<Warning>
+Group messages are excluded from MEMORY.md injection to prevent leaking private context.
+</Warning>
+
+### Features
+
+<AccordionGroup>
+  <Accordion title="Status Updates">
+    The Signal channel sends typing indicators during thinking phases and tool execution status in debug mode:
+
+    ```python
+    # Debug mode enabled
+    /debug
+    "Debug mode enabled. Tool execution will be shown in chat."
+
+    # Tool execution visible
+    "○ Running tool: shell_execute"
+    "● Tool 'shell_execute' completed (success)"
+    ```
+  </Accordion>
+
+  <Accordion title="Attachment Support">
+    Send and receive file attachments:
+
+    ```python
+    # Agent can send files from workspace
+    response.attachments = [
+        "/home/agent/.ironclaw/workspace/report.pdf"
+    ]
+
+    # Path validation ensures files are within sandbox
+    ```
+  </Accordion>
+
+  <Accordion title="Thread Persistence">
+    Conversations automatically maintain thread history:
+
+    ```python
+    # Uses deterministic UUIDs for consistent threads
+    # - DM: UUID from phone number or Signal UUID
+    # - Group: UUID from group ID
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Web Gateway Channel
+
+Browser-based UI with real-time updates:
+
+### Features
+
+- **REST API** for sending messages
+- **Server-Sent Events** (SSE) for real-time status
+- **WebSocket** for bidirectional communication
+- **Memory browser** for workspace exploration
+- **Job management** for sandbox execution monitoring
+
+### API Endpoints
+
+```bash
+# Send message
+POST /api/chat/send
+Authorization: Bearer <token>
+{
+  "content": "Hello",
+  "thread_id": "optional"
+}
+
+# Stream events
+GET /api/chat/events
+Authorization: Bearer <token>
+# Returns SSE stream with thinking, tool_use, result events
+
+# WebSocket (bidirectional)
+GET /api/chat/ws
+Upgrade: websocket
+Authorization: Bearer <token>
+```
+
+### Configuration
+
+```bash
+export GATEWAY_ENABLED=true
+export GATEWAY_PORT=3000
+export GATEWAY_AUTH_TOKEN="your-secure-token"
+export GATEWAY_USER_ID="web-user"
+```
+
+<Tip>
+If no auth token is provided, IronClaw generates a random one and prints it on startup.
+</Tip>
+
+### SSE Event Types
+
+```typescript
+type SseEvent =
+  | { type: 'thinking'; message: string }
+  | { type: 'tool_started'; name: string }
+  | { type: 'tool_completed'; name: string; success: boolean }
+  | { type: 'stream_chunk'; content: string }
+  | { type: 'response'; content: string }
+  | { type: 'job_started'; job_id: string; title: string }
+  | { type: 'approval_needed'; request_id: string; tool_name: string }
+```
+
+## Channel Implementation
+
+All channels implement the `Channel` trait:
+
+```rust
+#[async_trait]
+pub trait Channel: Send + Sync {
+    fn name(&self) -> &str;
+    async fn start(&self) -> Result<MessageStream, ChannelError>;
+    async fn respond(
+        &self,
+        msg: &IncomingMessage,
+        response: OutgoingResponse,
+    ) -> Result<(), ChannelError>;
+    async fn send_status(
+        &self,
+        status: StatusUpdate,
+        metadata: &serde_json::Value,
+    ) -> Result<(), ChannelError>;
+    async fn health_check(&self) -> Result<(), ChannelError>;
+    async fn shutdown(&self) -> Result<(), ChannelError>;
+}
+```
+
+### Creating a Custom Channel
+
+```rust
+use ironclaw::channels::{Channel, IncomingMessage, MessageStream};
+
+pub struct MyChannel;
+
+#[async_trait]
+impl Channel for MyChannel {
+    fn name(&self) -> &str {
+        "my_channel"
+    }
+
+    async fn start(&self) -> Result<MessageStream, ChannelError> {
+        let (tx, rx) = mpsc::channel(256);
+        // Start your message receiver
+        Ok(Box::pin(ReceiverStream::new(rx)))
+    }
+
+    async fn respond(
+        &self,
+        msg: &IncomingMessage,
+        response: OutgoingResponse,
+    ) -> Result<(), ChannelError> {
+        // Send response back to user
+        Ok(())
+    }
+
+    // Implement other methods...
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Tools" icon="wrench" href="/features/tools">
+    Learn about the dynamic tool system
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/onboarding">
+    Configure channel settings
+  </Card>
+</CardGroup>

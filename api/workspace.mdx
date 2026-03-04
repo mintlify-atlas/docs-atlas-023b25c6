@@ -1,0 +1,404 @@
+---
+title: 'Workspace API'
+description: 'Persistent memory system with filesystem-like API'
+---
+
+## Overview
+
+The Workspace provides persistent memory for agents with a flexible filesystem-like structure. Agents can create arbitrary markdown file hierarchies that get indexed for full-text and semantic search.
+
+Inspired by OpenClaw's memory system, the Workspace follows the principle: **if you want to remember something, write it**.
+
+## Filesystem Structure
+
+```text
+workspace/
+├── README.md              <- Root runbook/index
+├── MEMORY.md              <- Long-term curated memory
+├── HEARTBEAT.md           <- Periodic checklist
+├── context/               <- Identity and context
+│   ├── vision.md
+│   └── priorities.md
+├── daily/                 <- Daily logs
+│   ├── 2024-01-15.md
+│   └── 2024-01-16.md
+├── projects/              <- Arbitrary structure
+│   └── alpha/
+│       ├── README.md
+│       └── notes.md
+└── ...
+```
+
+## Workspace
+
+Provides database-backed memory storage for an agent.
+
+### Constructor (PostgreSQL)
+
+```rust src/workspace/mod.rs
+#[cfg(feature = "postgres")]
+pub fn new(user_id: impl Into<String>, pool: Pool) -> Self
+```
+
+Creates a new workspace backed by a PostgreSQL connection pool.
+
+<ParamField path="user_id" type="String" required>
+  User identifier (from channel)
+</ParamField>
+
+<ParamField path="pool" type="Pool" required>
+  PostgreSQL connection pool
+</ParamField>
+
+### Constructor (Generic Database)
+
+```rust src/workspace/mod.rs
+pub fn new_with_db(user_id: impl Into<String>, db: Arc<dyn Database>) -> Self
+```
+
+Creates a new workspace backed by any Database implementation (e.g., libSQL).
+
+<ParamField path="user_id" type="String" required>
+  User identifier
+</ParamField>
+
+<ParamField path="db" type="Arc<dyn Database>" required>
+  Database implementation
+</ParamField>
+
+### Configuration
+
+```rust src/workspace/mod.rs
+pub fn with_agent(mut self, agent_id: Uuid) -> Self
+pub fn with_embeddings(mut self, provider: Arc<dyn EmbeddingProvider>) -> Self
+```
+
+Optionally scope the workspace to a specific agent and/or add semantic search support.
+
+## File Operations
+
+### read
+
+```rust src/workspace/mod.rs
+pub async fn read(&self, path: &str) -> Result<MemoryDocument, WorkspaceError>
+```
+
+Reads a file by path. Returns the document if it exists, or an error if not found.
+
+<ParamField path="path" type="&str" required>
+  File path (e.g., "context/vision.md")
+</ParamField>
+
+**Returns:** `Result<MemoryDocument, WorkspaceError>`
+
+**Example:**
+```rust
+let doc = workspace.read("context/vision.md").await?;
+println!("{}", doc.content);
+```
+
+### write
+
+```rust src/workspace/mod.rs
+pub async fn write(&self, path: &str, content: &str) -> Result<MemoryDocument, WorkspaceError>
+```
+
+Writes (creates or updates) a file. Creates parent directories implicitly. Re-indexes the document for search after writing.
+
+<ParamField path="path" type="&str" required>
+  File path
+</ParamField>
+
+<ParamField path="content" type="&str" required>
+  File content
+</ParamField>
+
+**Returns:** `Result<MemoryDocument, WorkspaceError>`
+
+**Example:**
+```rust
+workspace.write(
+    "projects/alpha/README.md",
+    "# Project Alpha\n\nDescription here."
+).await?;
+```
+
+### append
+
+```rust src/workspace/mod.rs
+pub async fn append(&self, path: &str, content: &str) -> Result<(), WorkspaceError>
+```
+
+Appends content to a file. Creates the file if it doesn't exist. Adds a newline separator between existing and new content.
+
+<ParamField path="path" type="&str" required>
+  File path
+</ParamField>
+
+<ParamField path="content" type="&str" required>
+  Content to append
+</ParamField>
+
+### delete
+
+```rust src/workspace/mod.rs
+pub async fn delete(&self, path: &str) -> Result<(), WorkspaceError>
+```
+
+Deletes a file and its associated chunks.
+
+### exists
+
+```rust src/workspace/mod.rs
+pub async fn exists(&self, path: &str) -> Result<bool, WorkspaceError>
+```
+
+Checks if a file exists.
+
+### list
+
+```rust src/workspace/mod.rs
+pub async fn list(&self, directory: &str) -> Result<Vec<WorkspaceEntry>, WorkspaceError>
+```
+
+Lists files and directories in a path. Returns immediate children (not recursive). Use empty string or "/" for root directory.
+
+<ParamField path="directory" type="&str" required>
+  Directory path (e.g., "projects/")
+</ParamField>
+
+**Example:**
+```rust
+let entries = workspace.list("projects/").await?;
+for entry in entries {
+    if entry.is_directory {
+        println!("📁 {}/", entry.name());
+    } else {
+        println!("📄 {}", entry.name());
+    }
+}
+```
+
+### list_all
+
+```rust src/workspace/mod.rs
+pub async fn list_all(&self) -> Result<Vec<String>, WorkspaceError>
+```
+
+Lists all files recursively (flat list of all paths).
+
+## Convenience Methods
+
+### memory
+
+```rust src/workspace/mod.rs
+pub async fn memory(&self) -> Result<MemoryDocument, WorkspaceError>
+```
+
+Gets the main MEMORY.md document (long-term curated memory). Creates it if it doesn't exist.
+
+### today_log
+
+```rust src/workspace/mod.rs
+pub async fn today_log(&self) -> Result<MemoryDocument, WorkspaceError>
+```
+
+Gets today's daily log. Daily logs are append-only and keyed by date.
+
+### daily_log
+
+```rust src/workspace/mod.rs
+pub async fn daily_log(&self, date: NaiveDate) -> Result<MemoryDocument, WorkspaceError>
+```
+
+Gets a daily log for a specific date.
+
+### heartbeat_checklist
+
+```rust src/workspace/mod.rs
+pub async fn heartbeat_checklist(&self) -> Result<Option<String>, WorkspaceError>
+```
+
+Gets the heartbeat checklist (HEARTBEAT.md). Returns the DB-stored checklist if it exists, otherwise falls back to the in-memory seed template.
+
+### append_memory
+
+```rust src/workspace/mod.rs
+pub async fn append_memory(&self, entry: &str) -> Result<(), WorkspaceError>
+```
+
+Appends an entry to the main MEMORY.md document. This is for important facts, decisions, and preferences worth remembering long-term.
+
+### append_daily_log
+
+```rust src/workspace/mod.rs
+pub async fn append_daily_log(&self, entry: &str) -> Result<(), WorkspaceError>
+```
+
+Appends an entry to today's daily log with a timestamp.
+
+## System Prompt
+
+### system_prompt
+
+```rust src/workspace/mod.rs
+pub async fn system_prompt(&self) -> Result<String, WorkspaceError>
+```
+
+Builds the system prompt from identity files. Loads AGENTS.md, SOUL.md, USER.md, IDENTITY.md, and MEMORY.md to compose the agent's system prompt.
+
+### system_prompt_for_context
+
+```rust src/workspace/mod.rs
+pub async fn system_prompt_for_context(
+    &self,
+    is_group_chat: bool,
+) -> Result<String, WorkspaceError>
+```
+
+Builds the system prompt, optionally excluding personal memory. When `is_group_chat` is true, MEMORY.md is excluded to prevent leaking personal context into group conversations.
+
+## Search
+
+### search
+
+```rust src/workspace/mod.rs
+pub async fn search(
+    &self,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<SearchResult>, WorkspaceError>
+```
+
+Hybrid search across all memory documents. Combines full-text search (BM25) with semantic search (vector similarity) using Reciprocal Rank Fusion (RRF).
+
+<ParamField path="query" type="&str" required>
+  Search query
+</ParamField>
+
+<ParamField path="limit" type="usize" required>
+  Maximum number of results
+</ParamField>
+
+### search_with_config
+
+```rust src/workspace/mod.rs
+pub async fn search_with_config(
+    &self,
+    query: &str,
+    config: SearchConfig,
+) -> Result<Vec<SearchResult>, WorkspaceError>
+```
+
+Search with custom configuration.
+
+## Seeding
+
+### seed_if_empty
+
+```rust src/workspace/mod.rs
+pub async fn seed_if_empty(&self) -> Result<usize, WorkspaceError>
+```
+
+Seeds any missing core identity files in the workspace. Called on every boot. Only creates files that don't already exist, so user edits are never overwritten.
+
+**Returns:** Number of files created (0 if all core files already existed)
+
+### import_from_directory
+
+```rust src/workspace/mod.rs
+pub async fn import_from_directory(
+    &self,
+    dir: &std::path::Path,
+) -> Result<usize, WorkspaceError>
+```
+
+Imports markdown files from a directory on disk into the workspace DB. Only imports files that don't already exist in the database.
+
+### backfill_embeddings
+
+```rust src/workspace/mod.rs
+pub async fn backfill_embeddings(&self) -> Result<usize, WorkspaceError>
+```
+
+Generates embeddings for chunks that don't have them yet. Useful for backfilling embeddings after enabling the provider.
+
+## Types
+
+### MemoryDocument
+
+```rust src/workspace/document.rs
+pub struct MemoryDocument {
+    pub id: Uuid,
+    pub user_id: String,
+    pub agent_id: Option<Uuid>,
+    pub path: String,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+```
+
+### WorkspaceEntry
+
+```rust src/workspace/document.rs
+pub struct WorkspaceEntry {
+    pub path: String,
+    pub is_directory: bool,
+}
+```
+
+### SearchResult
+
+```rust src/workspace/search.rs
+pub struct SearchResult {
+    pub chunk_id: Uuid,
+    pub document_id: Uuid,
+    pub document_path: String,
+    pub content: String,
+    pub score: f32,
+    pub chunk_index: i32,
+}
+```
+
+### SearchConfig
+
+```rust src/workspace/search.rs
+pub struct SearchConfig {
+    pub limit: usize,
+    pub vector_weight: f32,
+    pub text_weight: f32,
+    pub rrf_k: usize,
+}
+```
+
+## Example
+
+```rust
+use ironclaw::workspace::Workspace;
+
+// Create workspace
+let workspace = Workspace::new_with_db("user_123", db)
+    .with_embeddings(embedding_provider);
+
+// Seed core files
+workspace.seed_if_empty().await?;
+
+// Write to memory
+workspace.write(
+    "projects/alpha/notes.md",
+    "# Alpha Project Notes\n\nKey decision: Use Rust for the backend."
+).await?;
+
+// Append to daily log
+workspace.append_daily_log("Completed Alpha project kickoff").await?;
+
+// Search
+let results = workspace.search("rust backend decision", 5).await?;
+for result in results {
+    println!("Found in {}: {}", result.document_path, result.content);
+}
+
+// Build system prompt
+let prompt = workspace.system_prompt().await?;
+```

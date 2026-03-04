@@ -1,0 +1,266 @@
+---
+title: 'Agent API'
+description: 'Core agent orchestration API for managing jobs, sessions, and tool execution'
+---
+
+## Overview
+
+The Agent API provides the core orchestration layer for IronClaw, managing:
+
+- Message routing from channels
+- Job scheduling and execution
+- Tool invocation with safety
+- Self-repair for stuck jobs
+- Proactive heartbeat execution
+- Routine-based scheduled and reactive jobs
+- Turn-based session management with undo
+- Context compaction for long conversations
+
+## Agent
+
+The main agent struct that coordinates all components.
+
+### Constructor
+
+```rust src/agent/agent_loop.rs
+pub fn new(
+    config: AgentConfig,
+    deps: AgentDeps,
+    channels: Arc<ChannelManager>,
+    heartbeat_config: Option<HeartbeatConfig>,
+    hygiene_config: Option<crate::config::HygieneConfig>,
+    routine_config: Option<RoutineConfig>,
+    context_manager: Option<Arc<ContextManager>>,
+    session_manager: Option<Arc<SessionManager>>,
+) -> Self
+```
+
+Creates a new agent with the specified configuration and dependencies.
+
+<ParamField path="config" type="AgentConfig" required>
+  Agent configuration including max parallel jobs, repair settings, and session timeouts
+</ParamField>
+
+<ParamField path="deps" type="AgentDeps" required>
+  Core dependencies including database, LLM provider, safety layer, and tool registry
+</ParamField>
+
+<ParamField path="channels" type="Arc<ChannelManager>" required>
+  Channel manager for handling multiple input/output channels
+</ParamField>
+
+<ParamField path="heartbeat_config" type="Option<HeartbeatConfig>">
+  Optional configuration for proactive heartbeat checks
+</ParamField>
+
+<ParamField path="routine_config" type="Option<RoutineConfig>">
+  Optional configuration for scheduled and event-driven routines
+</ParamField>
+
+<ParamField path="context_manager" type="Option<Arc<ContextManager>>">
+  Optional pre-created context manager (creates new one if not provided)
+</ParamField>
+
+<ParamField path="session_manager" type="Option<Arc<SessionManager>>">
+  Optional pre-created session manager (creates new one if not provided)
+</ParamField>
+
+### run
+
+```rust src/agent/agent_loop.rs
+pub async fn run(self) -> Result<(), Error>
+```
+
+Runs the agent main loop. Starts all channels, spawns background tasks (self-repair, heartbeat, routines), and processes incoming messages until shutdown.
+
+**Returns:** `Result<(), Error>` - Ok on clean shutdown, Error if startup fails
+
+### scheduler
+
+```rust src/agent/agent_loop.rs
+pub fn scheduler(&self) -> Arc<Scheduler>
+```
+
+Get the scheduler for external wiring (e.g., CreateJobTool).
+
+**Returns:** Shared reference to the scheduler
+
+## AgentDeps
+
+Core dependencies for the agent, bundling shared components to reduce argument count.
+
+### Fields
+
+<ResponseField name="store" type="Option<Arc<dyn Database>>">
+  Optional database for persistence
+</ResponseField>
+
+<ResponseField name="llm" type="Arc<dyn LlmProvider>">
+  Primary LLM provider for agent responses
+</ResponseField>
+
+<ResponseField name="cheap_llm" type="Option<Arc<dyn LlmProvider>>">
+  Optional cheap/fast LLM for lightweight tasks (heartbeat, routing, evaluation). Falls back to main LLM if None.
+</ResponseField>
+
+<ResponseField name="safety" type="Arc<SafetyLayer>">
+  Safety layer for content filtering and policy enforcement
+</ResponseField>
+
+<ResponseField name="tools" type="Arc<ToolRegistry>">
+  Registry of available tools
+</ResponseField>
+
+<ResponseField name="workspace" type="Option<Arc<Workspace>>">
+  Optional workspace for persistent memory
+</ResponseField>
+
+<ResponseField name="extension_manager" type="Option<Arc<ExtensionManager>>">
+  Optional extension manager for WASM and MCP tools
+</ResponseField>
+
+<ResponseField name="skill_registry" type="Option<Arc<RwLock<SkillRegistry>>>">
+  Optional skill registry for prompt-level skills
+</ResponseField>
+
+<ResponseField name="hooks" type="Arc<HookRegistry>">
+  Hook registry for intercepting inbound/outbound messages
+</ResponseField>
+
+<ResponseField name="cost_guard" type="Arc<CostGuard>">
+  Cost enforcement guardrails (daily budget, hourly rate limits)
+</ResponseField>
+
+## Session Management
+
+### Session
+
+Manages conversation state and turn history for a user.
+
+```rust src/agent/session.rs
+pub struct Session {
+    pub user_id: String,
+    pub threads: HashMap<String, Thread>,
+}
+```
+
+### Thread
+
+Represents a conversation thread with turn-based history.
+
+```rust src/agent/session.rs
+pub struct Thread {
+    pub id: String,
+    pub turns: Vec<Turn>,
+    pub state: ThreadState,
+    pub pending_auth: Option<PendingAuth>,
+}
+```
+
+### Turn
+
+A single turn in a conversation (user input + agent response).
+
+```rust src/agent/session.rs
+pub struct Turn {
+    pub id: Uuid,
+    pub user_input: String,
+    pub agent_response: String,
+    pub created_at: DateTime<Utc>,
+    pub state: TurnState,
+}
+```
+
+## Context Compaction
+
+The agent automatically compacts conversation context when it exceeds thresholds.
+
+### ContextMonitor
+
+```rust src/agent/context_monitor.rs
+pub struct ContextMonitor {
+    strategy: CompactionStrategy,
+}
+```
+
+Monitors context usage and triggers compaction when needed.
+
+### CompactionStrategy
+
+```rust src/agent/context_monitor.rs
+pub enum CompactionStrategy {
+    /// Never compact, just fail when limit reached
+    Never,
+    /// Compact when approaching limit (recommended)
+    Automatic { warning_threshold: usize, max_threshold: usize },
+    /// Always compact after every turn (aggressive)
+    Always,
+}
+```
+
+## Self-Repair
+
+The agent includes self-repair capabilities for stuck jobs and broken tools.
+
+### SelfRepair Trait
+
+```rust src/agent/self_repair.rs
+#[async_trait]
+pub trait SelfRepair: Send + Sync {
+    async fn detect_stuck_jobs(&self) -> Vec<StuckJob>;
+    async fn repair_stuck_job(&self, job: &StuckJob) -> Result<RepairResult, Error>;
+    async fn detect_broken_tools(&self) -> Vec<BrokenTool>;
+    async fn repair_broken_tool(&self, tool: &BrokenTool) -> Result<RepairResult, Error>;
+}
+```
+
+### RepairResult
+
+```rust src/agent/self_repair.rs
+pub enum RepairResult {
+    Success { message: String },
+    Failed { message: String },
+    ManualRequired { message: String },
+    Retry { message: String },
+}
+```
+
+## Example
+
+```rust
+use ironclaw::agent::{Agent, AgentDeps};
+use ironclaw::config::AgentConfig;
+use std::sync::Arc;
+
+// Create dependencies
+let deps = AgentDeps {
+    store: Some(db),
+    llm: Arc::new(llm_provider),
+    cheap_llm: None,
+    safety: Arc::new(safety_layer),
+    tools: Arc::new(tool_registry),
+    workspace: Some(Arc::new(workspace)),
+    extension_manager: None,
+    skill_registry: None,
+    skill_catalog: None,
+    skills_config: Default::default(),
+    hooks: Arc::new(hook_registry),
+    cost_guard: Arc::new(cost_guard),
+    sse_tx: None,
+};
+
+// Create agent
+let agent = Agent::new(
+    AgentConfig::default(),
+    deps,
+    channel_manager,
+    None, // heartbeat config
+    None, // hygiene config
+    None, // routine config
+    None, // context manager
+    None, // session manager
+);
+
+// Run agent (blocks until shutdown)
+agent.run().await?;
+```

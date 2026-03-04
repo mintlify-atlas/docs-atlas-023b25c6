@@ -1,0 +1,516 @@
+---
+title: 'Automated Routines'
+description: 'Schedule recurring tasks with cron, events, and webhooks'
+icon: 'clock'
+---
+
+Routines are named, persistent, user-owned tasks that fire automatically based on triggers (cron schedules, event patterns, or webhooks). Each routine runs independently with only its specific prompt and context sent to the LLM.
+
+## Architecture
+
+```text
+┌──────────┐     ┌─────────┐     ┌──────────────────┐
+│  Trigger  │────▶│ Engine  │────▶│  Execution Mode  │
+│ cron/event│     │guardrail│     │lightweight│full_job│
+│ webhook   │     │ check   │     └──────────────────┘
+│ manual    │     └─────────┘              │
+└──────────┘                               ▼
+                                    ┌──────────────┐
+                                    │  Notify user │
+                                    │  if needed   │
+                                    └──────────────┘
+```
+
+## Routine Types
+
+<CardGroup cols={2}>
+  <Card title="Lightweight" icon="feather">
+    Single LLM call, no tools. Fast and cheap for checks and notifications.
+  </Card>
+  <Card title="Full Job" icon="gears">
+    Multi-turn execution with tool access. For complex automation tasks.
+  </Card>
+</CardGroup>
+
+## Trigger Types
+
+### Cron Schedule
+
+Fire on a recurring schedule:
+
+```json
+{
+  "trigger": {
+    "type": "cron",
+    "schedule": "0 9 * * MON-FRI"
+  }
+}
+```
+
+Supported formats:
+- **Standard cron**: `0 9 * * MON-FRI` (9am weekdays)
+- **Human-readable**: `every 2h`, `every monday at 9am`
+- **Shortcuts**: `@hourly`, `@daily`, `@weekly`
+
+<Tip>
+Use [crontab.guru](https://crontab.guru/) to validate cron expressions.
+</Tip>
+
+### Event Pattern
+
+Fire when a channel message matches a regex:
+
+```json
+{
+  "trigger": {
+    "type": "event",
+    "channel": "signal",
+    "pattern": "(?i)urgent|emergency|down"
+  }
+}
+```
+
+The pattern is compiled as a Rust regex. Common patterns:
+- `(?i)keyword` - Case-insensitive match
+- `\b(word1|word2)\b` - Word boundary match
+- `^deploy.*prod` - Starts with "deploy", contains "prod"
+
+### Webhook
+
+Fire on incoming HTTP POST:
+
+```json
+{
+  "trigger": {
+    "type": "webhook",
+    "path": "github-deploy",
+    "secret": "your-hmac-secret"
+  }
+}
+```
+
+Webhook URL: `http://your-host/hooks/routine/{id}` or `http://your-host/hooks/routine/{path}`
+
+### Manual
+
+Fire only via tool call or CLI:
+
+```json
+{
+  "trigger": {
+    "type": "manual"
+  }
+}
+```
+
+## Execution Modes
+
+### Lightweight
+
+Single LLM call with context injection, no tool access:
+
+```json
+{
+  "action": {
+    "type": "lightweight",
+    "prompt": "Check if there are any urgent messages. If yes, summarize them. If no, reply HEARTBEAT_OK.",
+    "context_paths": ["context/priorities.md"],
+    "max_tokens": 4096
+  }
+}
+```
+
+Best for:
+- Periodic health checks
+- Notification summarization
+- Simple decision logic
+- Read-only operations
+
+### Full Job
+
+Multi-turn agent loop with full tool access:
+
+```json
+{
+  "action": {
+    "type": "full_job",
+    "title": "Deploy to production",
+    "description": "Pull latest main, run tests, deploy to prod if passing",
+    "max_iterations": 10
+  }
+}
+```
+
+Best for:
+- Complex automation
+- Multi-step workflows
+- Tool-heavy operations
+- File manipulation
+
+## Guardrails
+
+Routines enforce safety constraints:
+
+```json
+{
+  "guardrails": {
+    "cooldown": "5m",
+    "max_concurrent": 1,
+    "dedup_window": "1h"
+  }
+}
+```
+
+### Cooldown
+
+Minimum time between fires:
+
+```rust
+Duration::from_secs(300)  // 5 minutes
+```
+
+Prevents rapid-fire execution from event triggers.
+
+### Max Concurrent
+
+Limit simultaneous runs of the same routine:
+
+```rust
+max_concurrent: 1  // Only one instance at a time
+```
+
+Prevents resource exhaustion.
+
+### Dedup Window
+
+For event triggers, ignore duplicate content:
+
+```rust
+dedup_window: Some(Duration::from_secs(3600))  // 1 hour
+```
+
+Uses content hash to detect duplicates.
+
+## Notification Config
+
+Control when and how users are notified:
+
+```json
+{
+  "notify": {
+    "on_start": false,
+    "on_success": true,
+    "on_failure": true,
+    "channel": "signal",
+    "quiet_hours": {
+      "start": "23:00",
+      "end": "08:00",
+      "timezone": "America/Los_Angeles"
+    }
+  }
+}
+```
+
+### Quiet Hours
+
+Suppress notifications during sleep hours:
+
+```rust
+quiet_hours: Some(QuietHours {
+    start: "23:00",
+    end: "08:00",
+    timezone: "America/Los_Angeles",
+    allow_urgent: true,  // Override for urgent keywords
+})
+```
+
+## Creating Routines
+
+### Via CLI
+
+```bash
+# Create from JSON
+ironclaw routine create routine.json
+
+# Create interactively
+ironclaw routine create --interactive
+
+# List all routines
+ironclaw routine list
+
+# Enable/disable
+ironclaw routine enable <id>
+ironclaw routine disable <id>
+
+# Fire manually
+ironclaw routine fire <id>
+
+# View history
+ironclaw routine history <id>
+```
+
+### Via Tool
+
+```rust
+{
+  "tool": "routine_create",
+  "name": "morning_standup",
+  "description": "Daily standup check",
+  "trigger": {
+    "type": "cron",
+    "schedule": "0 9 * * MON-FRI"
+  },
+  "action": {
+    "type": "lightweight",
+    "prompt": "Review today's calendar and yesterday's notes. Suggest priorities.",
+    "context_paths": ["daily/"]
+  }
+}
+```
+
+### Example Routine Definitions
+
+<AccordionGroup>
+  <Accordion title="Heartbeat Monitor">
+    ```json
+    {
+      "name": "heartbeat",
+      "description": "Periodic health check",
+      "trigger": {
+        "type": "cron",
+        "schedule": "0 */4 * * *"
+      },
+      "action": {
+        "type": "lightweight",
+        "prompt": "Check HEARTBEAT.md checklist. If nothing urgent, reply HEARTBEAT_OK.",
+        "context_paths": ["HEARTBEAT.md"],
+        "max_tokens": 1024
+      },
+      "guardrails": {
+        "cooldown": "3h",
+        "max_concurrent": 1
+      },
+      "notify": {
+        "on_start": false,
+        "on_success": false,
+        "on_failure": true,
+        "quiet_hours": {
+          "start": "23:00",
+          "end": "08:00",
+          "timezone": "America/Los_Angeles"
+        }
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Emergency Responder">
+    ```json
+    {
+      "name": "emergency_responder",
+      "description": "React to urgent keywords",
+      "trigger": {
+        "type": "event",
+        "channel": "signal",
+        "pattern": "(?i)\\b(urgent|emergency|down|outage)\\b"
+      },
+      "action": {
+        "type": "full_job",
+        "title": "Emergency Response",
+        "description": "Check system status, review logs, notify team",
+        "max_iterations": 5
+      },
+      "guardrails": {
+        "cooldown": "5m",
+        "max_concurrent": 2,
+        "dedup_window": "30m"
+      },
+      "notify": {
+        "on_start": true,
+        "on_success": true,
+        "on_failure": true
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="GitHub Webhook Deploy">
+    ```json
+    {
+      "name": "auto_deploy",
+      "description": "Deploy on push to main",
+      "trigger": {
+        "type": "webhook",
+        "path": "github-main",
+        "secret": "your-webhook-secret"
+      },
+      "action": {
+        "type": "full_job",
+        "title": "Deploy to Production",
+        "description": "Pull latest, run tests, deploy if passing",
+        "max_iterations": 15
+      },
+      "guardrails": {
+        "cooldown": "1m",
+        "max_concurrent": 1
+      },
+      "notify": {
+        "on_start": true,
+        "on_success": true,
+        "on_failure": true,
+        "channel": "signal"
+      }
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Daily Standup">
+    ```json
+    {
+      "name": "daily_standup",
+      "description": "Morning priority summary",
+      "trigger": {
+        "type": "cron",
+        "schedule": "0 9 * * MON-FRI"
+      },
+      "action": {
+        "type": "lightweight",
+        "prompt": "Review today's calendar and yesterday's notes. Suggest 3 priorities for today.",
+        "context_paths": ["daily/", "context/priorities.md"],
+        "max_tokens": 2048
+      },
+      "guardrails": {
+        "cooldown": "8h",
+        "max_concurrent": 1
+      },
+      "notify": {
+        "on_start": false,
+        "on_success": true,
+        "on_failure": false,
+        "channel": "signal"
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Engine Implementation
+
+The routine engine runs two independent loops:
+
+### Cron Ticker
+
+```rust
+// Poll DB every 60 seconds for due routines
+let mut ticker = tokio::time::interval(Duration::from_secs(60));
+loop {
+    ticker.tick().await;
+    engine.check_cron_triggers().await;
+}
+```
+
+### Event Matcher
+
+```rust
+// Called synchronously from agent main loop
+let fired = engine.check_event_triggers(&incoming_message).await;
+```
+
+Event triggers are cached in memory with compiled regexes.
+
+## Execution Flow
+
+1. **Trigger fires** (cron, event, webhook, manual)
+2. **Guardrail checks** (cooldown, max_concurrent, dedup)
+3. **Global capacity check** (max_concurrent_routines)
+4. **Spawn execution**
+   - Lightweight: Single LLM call
+   - Full Job: Delegate to scheduler
+5. **Record result** (success/failure, message, iterations)
+6. **Notify user** (if configured)
+7. **Update next_fire_at** (for cron triggers)
+
+## Database Schema
+
+```sql
+CREATE TABLE routines (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    user_id TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    
+    -- Trigger
+    trigger_type TEXT NOT NULL,
+    trigger_config JSONB NOT NULL,
+    
+    -- Action
+    action_type TEXT NOT NULL,
+    action_config JSONB NOT NULL,
+    
+    -- Guardrails
+    guardrails JSONB NOT NULL,
+    
+    -- Notification
+    notify_config JSONB NOT NULL,
+    
+    -- Runtime state
+    last_run_at TIMESTAMP,
+    next_fire_at TIMESTAMP,
+    run_count BIGINT NOT NULL DEFAULT 0,
+    consecutive_failures INT NOT NULL DEFAULT 0,
+    state JSONB NOT NULL DEFAULT '{}',
+    
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE routine_runs (
+    id UUID PRIMARY KEY,
+    routine_id UUID NOT NULL REFERENCES routines(id),
+    trigger_detail TEXT,
+    status TEXT NOT NULL,
+    result_message TEXT,
+    iterations INT,
+    started_at TIMESTAMP NOT NULL,
+    completed_at TIMESTAMP,
+    FOREIGN KEY (routine_id) REFERENCES routines(id) ON DELETE CASCADE
+);
+```
+
+## Configuration
+
+```bash
+# Global routine settings
+export ROUTINE_ENABLED=true
+export ROUTINE_MAX_CONCURRENT=10
+export ROUTINE_CRON_POLL_INTERVAL=60  # seconds
+export ROUTINE_EVENT_CACHE_REFRESH=300  # seconds
+```
+
+## Monitoring
+
+```bash
+# View routine status
+ironclaw routine status
+
+# View run history
+ironclaw routine history <id> --limit 20
+
+# View currently running
+ironclaw routine running
+
+# Inspect state
+ironclaw routine inspect <id>
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Sandbox" icon="docker" href="/features/sandbox">
+    Learn about Docker-based job execution
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/agent">
+    API documentation for routines
+  </Card>
+</CardGroup>

@@ -1,0 +1,355 @@
+---
+title: "Onboarding Wizard"
+description: "Interactive setup guide for first-time IronClaw configuration"
+---
+
+## Overview
+
+The onboarding wizard is an interactive CLI tool that guides you through configuring IronClaw for the first time. It handles database connection, security setup, LLM provider authentication, and channel configuration.
+
+## Running the Wizard
+
+### First-Time Setup
+
+```bash
+ironclaw onboard
+```
+
+The wizard runs automatically on first launch if no database is configured. You can also trigger it manually with the command above.
+
+### Options
+
+```bash
+# Skip authentication (use existing session)
+ironclaw onboard --skip-auth
+
+# Reconfigure channels only
+ironclaw onboard --channels-only
+```
+
+## Setup Steps
+
+The wizard guides you through 9 configuration steps:
+
+### Step 1: Database Connection
+
+Choose between PostgreSQL or libSQL (embedded SQLite) as your database backend.
+
+<AccordionGroup>
+  <Accordion title="PostgreSQL" icon="database">
+    **Requirements:**
+    - PostgreSQL 15+ server running
+    - [pgvector](https://github.com/pgvector/pgvector) extension installed
+    
+    **Setup:**
+    ```bash
+    # Create database
+    createdb ironclaw
+    
+    # Enable pgvector
+    psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    ```
+    
+    **Connection URL format:**
+    ```
+    postgres://user:password@host:port/database
+    ```
+    
+    The wizard will test the connection and optionally run migrations.
+  </Accordion>
+  
+  <Accordion title="libSQL (Embedded)" icon="laptop">
+    **No external database required.** libSQL provides an embedded SQLite database with optional Turso cloud sync.
+    
+    **Local path:** `~/.ironclaw/ironclaw.db` (default)
+    
+    **Optional Turso sync:**
+    - Remote replica URL: `libsql://your-db.turso.io`
+    - Auth token from [Turso dashboard](https://turso.tech)
+    
+    Migrations run automatically (idempotent).
+  </Accordion>
+</AccordionGroup>
+
+### Step 2: Security (Master Key)
+
+Configure encryption for API tokens and secrets.
+
+<CardGroup cols={3}>
+  <Card title="OS Keychain" icon="key">
+    **Recommended for local installs**
+    
+    Stores the master key in your system keychain (macOS Keychain, GNOME Keyring, Windows Credential Manager).
+    
+    The wizard generates a 256-bit key and stores it securely.
+  </Card>
+  
+  <Card title="Environment Variable" icon="terminal">
+    **For CI/Docker/VPS**
+    
+    Generates a key and prints an export command:
+    ```bash
+    export SECRETS_MASTER_KEY=abc123...
+    ```
+    
+    Add this to your shell profile or `.env` file.
+  </Card>
+  
+  <Card title="Skip" icon="ban">
+    **Disable secrets features**
+    
+    Channel tokens must be set via environment variables instead of the encrypted secrets store.
+  </Card>
+</CardGroup>
+
+<Note>
+  On macOS, the keychain may prompt for your password twice:
+  1. To unlock the keychain
+  2. To authorize IronClaw access
+  
+  This is normal OS behavior.
+</Note>
+
+### Step 3: Inference Provider
+
+Select your LLM provider and authenticate.
+
+<Tabs>
+  <Tab title="NEAR AI">
+    **Default provider** with multi-model access via NEAR account.
+    
+    **Authentication:**
+    - **Browser OAuth** (GitHub/Google) → NEAR AI Chat mode
+    - **API key** from [cloud.near.ai](https://cloud.near.ai) → NEAR AI Cloud mode
+    
+    Session tokens are saved to `~/.ironclaw/session.json`.
+  </Tab>
+  
+  <Tab title="Anthropic">
+    Direct Claude API access.
+    
+    **API key required:** Get from [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
+    
+    Popular models:
+    - `claude-sonnet-4-20250514`
+    - `claude-3-5-sonnet-20241022`
+    - `claude-3-5-haiku-20241022`
+  </Tab>
+  
+  <Tab title="OpenAI">
+    Direct GPT API access.
+    
+    **API key required:** Get from [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+    
+    Popular models:
+    - `gpt-4o`
+    - `gpt-4o-mini`
+    - `o3-mini`
+  </Tab>
+  
+  <Tab title="Ollama">
+    Local inference, no API key needed.
+    
+    **Requirements:** [Ollama](https://ollama.com) installed and running
+    
+    **Base URL:** `http://localhost:11434` (default)
+    
+    Pull a model first:
+    ```bash
+    ollama pull llama3.2
+    ```
+  </Tab>
+  
+  <Tab title="OpenRouter">
+    Access 300+ models via a single API key.
+    
+    **API key required:** Get from [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+    
+    **Base URL:** `https://openrouter.ai/api/v1` (pre-configured)
+  </Tab>
+  
+  <Tab title="OpenAI-compatible">
+    Custom endpoints (vLLM, LiteLLM, Together AI, Fireworks AI, LM Studio).
+    
+    **Base URL required:** e.g., `http://localhost:8000/v1`
+    
+    **API key:** Optional (depends on your endpoint)
+  </Tab>
+</Tabs>
+
+### Step 4: Model Selection
+
+The wizard fetches available models from your provider (with a 5-second timeout) and presents a selection menu.
+
+**If model fetching fails**, a static fallback list is used. You can always enter a custom model ID.
+
+### Step 5: Embeddings (Semantic Search)
+
+Enable semantic search for workspace memory using vector embeddings.
+
+**Providers:**
+- **NEAR AI** (if configured)
+- **OpenAI** (if API key available)
+
+**Default model:** `text-embedding-3-small`
+
+If you skip this step, workspace search uses keyword matching only.
+
+### Step 6: Channel Configuration
+
+Enable input channels for interacting with IronClaw.
+
+**Available channels:**
+- **CLI/TUI** (always enabled)
+- **HTTP Webhook** server
+- **Telegram** bot (WASM channel)
+- **Signal** messaging (WASM channel)
+- **Slack** bot (WASM channel)
+
+**For webhook channels**, the wizard can set up a tunnel:
+- **ngrok** (recommended)
+- **Cloudflare Tunnel**
+- **localtunnel**
+- **Custom URL**
+
+Each channel requires specific credentials (bot tokens, signing secrets, etc.). The wizard guides you through collecting and securely storing these.
+
+### Step 7: Extensions (Tools)
+
+Install WASM tools from the extension registry.
+
+**Common tools:**
+- Web search (Google, Brave, Tavily)
+- Calendar and email
+- File operations
+- Code execution
+
+Tools tagged `"default"` are pre-selected. Already installed tools are also pre-checked.
+
+### Step 8: Docker Sandbox
+
+Configure isolated container execution for untrusted code.
+
+**Options:**
+- Enable/disable sandbox
+- Container image
+- Resource limits
+
+### Step 9: Background Tasks (Heartbeat)
+
+Enable periodic background execution for monitoring and maintenance.
+
+**Configuration:**
+- Interval in minutes (default: 30)
+- Notification channel
+- Workspace hygiene (automatic cleanup)
+
+## Settings Persistence
+
+IronClaw uses a two-layer settings architecture:
+
+### Layer 1: Bootstrap (`.env` file)
+
+Settings needed **before** database connection are written to `~/.ironclaw/.env`:
+
+```bash
+DATABASE_BACKEND=postgres
+DATABASE_URL=postgres://user:pass@localhost/ironclaw
+LLM_BACKEND=nearai
+ONBOARD_COMPLETED=true
+```
+
+### Layer 2: Database
+
+All other settings are stored as key-value pairs in the `settings` table:
+
+```
+selected_model = "anthropic/claude-sonnet-4-5"
+embeddings.enabled = "true"
+embeddings.provider = "nearai"
+channels.http_enabled = "true"
+heartbeat.enabled = "true"
+```
+
+**Incremental persistence:** Settings are saved after each successful step, so progress isn't lost if a later step fails.
+
+## Remote/VPS Setup
+
+On remote servers, the browser OAuth flow may not work because `http://127.0.0.1:9876` is unreachable.
+
+<Tabs>
+  <Tab title="NEAR AI Cloud API Key">
+    **Recommended for servers**
+    
+    Select option 4 in the NEAR AI auth menu and paste your API key from [cloud.near.ai](https://cloud.near.ai).
+    
+    No local listener needed.
+  </Tab>
+  
+  <Tab title="Custom Callback URL">
+    Set up port forwarding or a reverse proxy:
+    
+    ```bash
+    export IRONCLAW_OAUTH_CALLBACK_URL=https://myserver.example.com:9876
+    ironclaw onboard
+    ```
+    
+    The server must forward requests to port 9876 on the VPS.
+  </Tab>
+</Tabs>
+
+## Reconfiguration
+
+You can re-run the wizard at any time:
+
+```bash
+# Full reconfiguration
+ironclaw onboard
+
+# Channels only
+ironclaw onboard --channels-only
+```
+
+Existing settings are loaded from the database, so you only need to change what you want to update.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="PostgreSQL connection fails">
+    **Check version:**
+    ```bash
+    psql --version  # Must be 15+
+    ```
+    
+    **Check pgvector:**
+    ```bash
+    psql ironclaw -c "SELECT * FROM pg_available_extensions WHERE name = 'vector';"
+    ```
+    
+    **Install pgvector:**
+    - macOS: `brew install pgvector`
+    - Ubuntu: `apt install postgresql-15-pgvector`
+    - Docker: Use `pgvector/pgvector:pg15` image
+  </Accordion>
+  
+  <Accordion title="Keychain prompts multiple times">
+    macOS system behavior. The keychain triggers two dialogs:
+    1. Unlock keychain
+    2. Authorize app access
+    
+    Click "Always Allow" to prevent future prompts.
+  </Accordion>
+  
+  <Accordion title="Browser OAuth doesn't open">
+    **On remote servers:** Use NEAR AI Cloud API key instead (option 4).
+    
+    **On local machines:** Check if port 9876 is available:
+    ```bash
+    lsof -i :9876
+    ```
+  </Accordion>
+  
+  <Accordion title="Model fetching times out">
+    The wizard falls back to a static model list. You can still select a custom model ID at the end of the list.
+  </Accordion>
+</AccordionGroup>

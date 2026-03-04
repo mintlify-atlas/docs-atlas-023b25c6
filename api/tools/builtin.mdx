@@ -1,0 +1,592 @@
+---
+title: 'Built-in Tools'
+description: 'Core tools that come with IronClaw'
+---
+
+## Overview
+
+IronClaw includes a comprehensive set of built-in tools organized by domain:
+
+- **Basic**: Echo, Time, JSON manipulation
+- **Network**: HTTP requests, Web fetching
+- **Files**: Read, Write, List, Apply patches
+- **Memory**: Search, Read, Write workspace files
+- **Shell**: Execute shell commands (container-only)
+- **Jobs**: Create, List, Status, Cancel background jobs
+- **Extensions**: Search, Install, Auth, Activate MCP/WASM tools
+- **Skills**: Search, Install, Remove prompt-level skills
+- **Routines**: Create, List, Update, Delete scheduled/event-driven tasks
+- **Messaging**: Send messages to channels
+
+## Basic Tools
+
+### EchoTool
+
+Echoes back the input message. Useful for testing.
+
+```rust src/tools/builtin/echo.rs
+fn name(&self) -> &str { "echo" }
+```
+
+**Parameters:**
+- `message` (string, required): The message to echo back
+
+**Domain:** Orchestrator
+
+**Approval:** Never
+
+### TimeTool
+
+Returns the current UTC time and date.
+
+```rust src/tools/builtin/time.rs
+fn name(&self) -> &str { "time" }
+```
+
+**Parameters:** None
+
+**Domain:** Orchestrator
+
+**Example output:**
+```json
+{
+  "utc": "2024-01-15T14:30:00Z",
+  "unix": 1705329000
+}
+```
+
+### JsonTool
+
+Manipulates JSON data (parse, query, transform).
+
+```rust src/tools/builtin/json.rs
+fn name(&self) -> &str { "json" }
+```
+
+**Parameters:**
+- `operation` (string, required): Operation to perform: "parse", "query", "transform"
+- `data`: Input data
+- `path`: JSON path for query operations
+- `template`: Template for transform operations
+
+**Domain:** Orchestrator
+
+## Network Tools
+
+### HttpTool
+
+Makes HTTP requests with credential injection support.
+
+```rust src/tools/builtin/http.rs
+fn name(&self) -> &str { "http" }
+```
+
+**Parameters:**
+- `url` (string, required): Target URL
+- `method` (string): HTTP method (default: "GET")
+- `headers` (object): Request headers
+- `body`: Request body
+- `timeout_ms` (number): Request timeout in milliseconds
+
+**Domain:** Orchestrator
+
+**Rate Limit:** 60/min, 1000/hour
+
+**Features:**
+- Automatic credential injection from secrets store
+- OAuth token refresh
+- Response sanitization
+- Timeout support
+
+### WebFetchTool
+
+Fetches web pages and converts them to clean markdown.
+
+```rust src/tools/builtin/web_fetch.rs
+fn name(&self) -> &str { "web_fetch" }
+```
+
+**Parameters:**
+- `url` (string, required): URL to fetch
+- `follow_redirects` (boolean): Follow HTTP redirects (default: true)
+- `timeout_ms` (number): Request timeout in milliseconds
+
+**Domain:** Orchestrator
+
+**Features:**
+- HTML to Markdown conversion
+- JavaScript rendering (when available)
+- Clean text extraction
+
+## File Tools
+
+### ReadFileTool
+
+Reads file contents.
+
+```rust src/tools/builtin/file.rs
+fn name(&self) -> &str { "read_file" }
+```
+
+**Parameters:**
+- `path` (string, required): File path to read
+- `start_line` (number): Optional start line (1-indexed)
+- `end_line` (number): Optional end line (inclusive)
+
+**Domain:** Container
+
+### WriteFileTool
+
+Writes content to a file.
+
+```rust src/tools/builtin/file.rs
+fn name(&self) -> &str { "write_file" }
+```
+
+**Parameters:**
+- `path` (string, required): File path to write
+- `content` (string, required): Content to write
+
+**Domain:** Container
+
+**Rate Limit:** 60/min, 1000/hour
+
+### ListDirTool
+
+Lists directory contents.
+
+```rust src/tools/builtin/file.rs
+fn name(&self) -> &str { "list_dir" }
+```
+
+**Parameters:**
+- `path` (string): Directory path (default: current directory)
+- `recursive` (boolean): List recursively (default: false)
+
+**Domain:** Container
+
+### ApplyPatchTool
+
+Applies a unified diff patch to a file.
+
+```rust src/tools/builtin/file.rs
+fn name(&self) -> &str { "apply_patch" }
+```
+
+**Parameters:**
+- `path` (string, required): File path to patch
+- `patch` (string, required): Unified diff patch content
+
+**Domain:** Container
+
+**Rate Limit:** 60/min, 1000/hour
+
+## Memory Tools
+
+### MemorySearchTool
+
+Searches workspace documents using hybrid search (BM25 + semantic).
+
+```rust src/tools/builtin/memory.rs
+fn name(&self) -> &str { "memory_search" }
+```
+
+**Parameters:**
+- `query` (string, required): Search query
+- `limit` (number): Maximum results (default: 5)
+
+**Domain:** Orchestrator
+
+### MemoryReadTool
+
+Reads a workspace file by path.
+
+```rust src/tools/builtin/memory.rs
+fn name(&self) -> &str { "memory_read" }
+```
+
+**Parameters:**
+- `path` (string, required): File path to read (e.g., "MEMORY.md", "projects/alpha/notes.md")
+
+**Domain:** Orchestrator
+
+### MemoryWriteTool
+
+Writes to workspace files.
+
+```rust src/tools/builtin/memory.rs
+fn name(&self) -> &str { "memory_write" }
+```
+
+**Parameters:**
+- `target` (string, required): Target location: "memory", "daily", "heartbeat", "bootstrap", or a custom path
+- `content` (string, required): Content to write
+- `mode` (string): Write mode: "append" or "overwrite" (default: "append")
+
+**Domain:** Orchestrator
+
+**Rate Limit:** 60/min, 1000/hour
+
+**Protected Files:** USER.md, IDENTITY.md, SOUL.md, AGENTS.md cannot be written by tools (security)
+
+### MemoryTreeTool
+
+Lists all files in the workspace as a tree structure.
+
+```rust src/tools/builtin/memory.rs
+fn name(&self) -> &str { "memory_tree" }
+```
+
+**Parameters:** None
+
+**Domain:** Orchestrator
+
+## Shell Tool
+
+### ShellTool
+
+Executes shell commands.
+
+```rust src/tools/builtin/shell.rs
+fn name(&self) -> &str { "shell" }
+```
+
+**Parameters:**
+- `command` (string, required): Shell command to execute
+- `workdir` (string): Working directory (optional)
+- `timeout_ms` (number): Execution timeout in milliseconds
+
+**Domain:** Container (must run in sandboxed environment)
+
+**Rate Limit:** 60/min, 1000/hour
+
+**Approval:** UnlessAutoApproved (can be session-auto-approved)
+
+## Job Tools
+
+### CreateJobTool
+
+Creates a background job for long-running tasks.
+
+```rust src/tools/builtin/job.rs
+fn name(&self) -> &str { "create_job" }
+```
+
+**Parameters:**
+- `prompt` (string, required): Task description for the job
+- `title` (string): Optional job title
+- `interactive` (boolean): Whether the job needs user interaction (default: false)
+
+**Domain:** Orchestrator
+
+**Rate Limit:** 10/min, 100/hour
+
+### ListJobsTool
+
+Lists all jobs for the current user.
+
+```rust src/tools/builtin/job.rs
+fn name(&self) -> &str { "list_jobs" }
+```
+
+**Parameters:**
+- `status` (string): Filter by status: "active", "completed", "failed", or "all" (default: "all")
+
+**Domain:** Orchestrator
+
+### JobStatusTool
+
+Gets detailed status of a specific job.
+
+```rust src/tools/builtin/job.rs
+fn name(&self) -> &str { "job_status" }
+```
+
+**Parameters:**
+- `job_id` (string, required): Job ID to check
+
+**Domain:** Orchestrator
+
+### CancelJobTool
+
+Cancels a running job.
+
+```rust src/tools/builtin/job.rs
+fn name(&self) -> &str { "cancel_job" }
+```
+
+**Parameters:**
+- `job_id` (string, required): Job ID to cancel
+
+**Domain:** Orchestrator
+
+**Approval:** UnlessAutoApproved
+
+### JobEventsTool
+
+Reads event stream for a job (tool calls, outputs, errors).
+
+```rust src/tools/builtin/job.rs
+fn name(&self) -> &str { "job_events" }
+```
+
+**Parameters:**
+- `job_id` (string, required): Job ID to read events from
+- `after` (number): Optional timestamp to read events after
+
+**Domain:** Orchestrator
+
+### JobPromptTool
+
+Responds to an interactive prompt from a job.
+
+```rust src/tools/builtin/job.rs
+fn name(&self) -> &str { "job_prompt" }
+```
+
+**Parameters:**
+- `job_id` (string, required): Job ID
+- `prompt_id` (string, required): Prompt ID from job_events
+- `response` (string, required): User's response
+
+**Domain:** Orchestrator
+
+## Extension Tools
+
+### ToolSearchTool
+
+Searches the extension catalog for available tools.
+
+```rust src/tools/builtin/extension_tools.rs
+fn name(&self) -> &str { "tool_search" }
+```
+
+**Parameters:**
+- `query` (string, required): Search query
+- `limit` (number): Maximum results (default: 10)
+
+**Domain:** Orchestrator
+
+### ToolInstallTool
+
+Installs a tool from the catalog.
+
+```rust src/tools/builtin/extension_tools.rs
+fn name(&self) -> &str { "tool_install" }
+```
+
+**Parameters:**
+- `name` (string, required): Tool name to install
+
+**Domain:** Orchestrator
+
+**Approval:** UnlessAutoApproved
+
+### ToolAuthTool
+
+Authenticates with a tool/extension.
+
+```rust src/tools/builtin/extension_tools.rs
+fn name(&self) -> &str { "tool_auth" }
+```
+
+**Parameters:**
+- `name` (string, required): Extension name
+- `token` (string): Optional authentication token
+
+**Domain:** Orchestrator
+
+### ToolActivateTool
+
+Activates an installed tool.
+
+```rust src/tools/builtin/extension_tools.rs
+fn name(&self) -> &str { "tool_activate" }
+```
+
+**Parameters:**
+- `name` (string, required): Tool name to activate
+
+**Domain:** Orchestrator
+
+### ToolListTool
+
+Lists all installed extensions.
+
+```rust src/tools/builtin/extension_tools.rs
+fn name(&self) -> &str { "tool_list" }
+```
+
+**Parameters:** None
+
+**Domain:** Orchestrator
+
+### ToolRemoveTool
+
+Removes an installed tool.
+
+```rust src/tools/builtin/extension_tools.rs
+fn name(&self) -> &str { "tool_remove" }
+```
+
+**Parameters:**
+- `name` (string, required): Tool name to remove
+
+**Domain:** Orchestrator
+
+**Approval:** UnlessAutoApproved
+
+## Skill Tools
+
+### SkillListTool
+
+Lists all installed skills.
+
+```rust src/tools/builtin/skill_tools.rs
+fn name(&self) -> &str { "skill_list" }
+```
+
+**Parameters:** None
+
+**Domain:** Orchestrator
+
+### SkillSearchTool
+
+Searches the skill catalog.
+
+```rust src/tools/builtin/skill_tools.rs
+fn name(&self) -> &str { "skill_search" }
+```
+
+**Parameters:**
+- `query` (string, required): Search query
+- `limit` (number): Maximum results (default: 10)
+
+**Domain:** Orchestrator
+
+### SkillInstallTool
+
+Installs a skill from the catalog.
+
+```rust src/tools/builtin/skill_tools.rs
+fn name(&self) -> &str { "skill_install" }
+```
+
+**Parameters:**
+- `name` (string, required): Skill name to install
+
+**Domain:** Orchestrator
+
+### SkillRemoveTool
+
+Removes an installed skill.
+
+```rust src/tools/builtin/skill_tools.rs
+fn name(&self) -> &str { "skill_remove" }
+```
+
+**Parameters:**
+- `name` (string, required): Skill name to remove
+
+**Domain:** Orchestrator
+
+## Routine Tools
+
+### RoutineCreateTool
+
+Creates a scheduled or event-driven routine.
+
+```rust src/tools/builtin/routine.rs
+fn name(&self) -> &str { "routine_create" }
+```
+
+**Parameters:**
+- `name` (string, required): Routine name
+- `description` (string, required): What the routine does
+- `action` (object, required): Action to execute (either "job" or "message")
+- `trigger` (object, required): Trigger condition ("cron" or "event")
+
+**Domain:** Orchestrator
+
+**Approval:** UnlessAutoApproved
+
+### RoutineListTool
+
+Lists all routines.
+
+```rust src/tools/builtin/routine.rs
+fn name(&self) -> &str { "routine_list" }
+```
+
+**Parameters:** None
+
+**Domain:** Orchestrator
+
+### RoutineUpdateTool
+
+Updates an existing routine.
+
+```rust src/tools/builtin/routine.rs
+fn name(&self) -> &str { "routine_update" }
+```
+
+**Parameters:**
+- `name` (string, required): Routine name
+- `enabled` (boolean): Enable/disable the routine
+- `description` (string): Updated description
+- `action` (object): Updated action
+- `trigger` (object): Updated trigger
+
+**Domain:** Orchestrator
+
+**Approval:** UnlessAutoApproved
+
+### RoutineDeleteTool
+
+Deletes a routine.
+
+```rust src/tools/builtin/routine.rs
+fn name(&self) -> &str { "routine_delete" }
+```
+
+**Parameters:**
+- `name` (string, required): Routine name to delete
+
+**Domain:** Orchestrator
+
+**Approval:** UnlessAutoApproved
+
+### RoutineHistoryTool
+
+Views execution history for a routine.
+
+```rust src/tools/builtin/routine.rs
+fn name(&self) -> &str { "routine_history" }
+```
+
+**Parameters:**
+- `name` (string, required): Routine name
+- `limit` (number): Maximum entries (default: 10)
+
+**Domain:** Orchestrator
+
+## Messaging Tool
+
+### MessageTool
+
+Sends a message to a channel.
+
+```rust src/tools/builtin/message.rs
+fn name(&self) -> &str { "message" }
+```
+
+**Parameters:**
+- `content` (string, required): Message content to send
+- `channel` (string): Target channel (defaults to current channel)
+- `target` (string): Target user/group (defaults to current conversation)
+
+**Domain:** Orchestrator
+
+**Rate Limit:** 60/min, 1000/hour
+
+**Note:** The agent automatically sets the default channel and target for each turn based on the incoming message context.

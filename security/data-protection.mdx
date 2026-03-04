@@ -1,0 +1,468 @@
+---
+title: 'Data Protection'
+description: 'Local storage, encryption, and data privacy guarantees'
+---
+
+## Overview
+
+IronClaw stores all data locally in your PostgreSQL database (or libSQL for embedded deployments). No information is sent to external services except when you explicitly use tools that make API calls.
+
+## Data Storage Architecture
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                             Data Storage Layers                              │
+│                                                                              │
+│   Application ──▶ Database Abstraction ──▶ PostgreSQL / libSQL             │
+│   (IronClaw)      (Backend trait)          (Local storage)                  │
+│                                                                              │
+│   Data Types:                                                               │
+│   - Conversations & Messages                                                │
+│   - Job History & Events                                                    │
+│   - Workspace Files (vector search)                                         │
+│   - Secrets (AES-256-GCM encrypted)                                         │
+│   - Settings & Configuration                                                │
+│   - WASM Tool Binaries                                                      │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Local-First Architecture
+
+### No Cloud Dependencies
+
+IronClaw is designed to work entirely offline:
+
+- **Database**: Local PostgreSQL or libSQL file
+- **Vector search**: pgvector extension (no external embedding API)
+- **Tool execution**: Local WASM runtime
+- **Secrets**: Encrypted in local database
+
+<Info>
+  The only external connections are to LLM providers (OpenAI, Anthropic, etc.) when you explicitly send a message. You control which provider via configuration.
+</Info>
+
+### Data Ownership
+
+You own all your data:
+
+- **Conversations**: Stored in `conversations` and `messages` tables
+- **Workspace**: Files in `workspace_entries` and `memory_chunks` (for vector search)
+- **Secrets**: Encrypted in `secrets` table
+- **Job history**: `jobs`, `job_events`, `llm_calls` for full audit trail
+- **Settings**: `settings` table (user preferences)
+
+## Database Backends
+
+### PostgreSQL (Default)
+
+**Recommended for:**
+
+- Desktop installations
+- Multi-user deployments
+- High-volume usage
+
+**Setup:**
+
+```bash
+createdb ironclaw
+psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+**Connection:**
+
+```bash
+export DATABASE_URL="postgresql://user:pass@localhost/ironclaw"
+ironclaw
+```
+
+<Info>
+  PostgreSQL provides ACID guarantees, concurrent access, and native vector search with pgvector.
+</Info>
+
+### libSQL (Embedded)
+
+**Recommended for:**
+
+- Single-user installs
+- Edge deployments
+- Portable installations (no server required)
+
+**Setup:**
+
+```bash
+export DATABASE_BACKEND=libsql
+export LIBSQL_PATH=~/.ironclaw/ironclaw.db
+ironclaw
+```
+
+**Remote Replicas (Turso):**
+
+```bash
+export LIBSQL_URL="libsql://your-db.turso.io"
+export LIBSQL_AUTH_TOKEN="your-token"
+```
+
+<Warning>
+  libSQL files are portable but lack some PostgreSQL features (e.g., native vector search requires custom indexing).
+</Warning>
+
+## Encryption
+
+### Secrets Encryption
+
+All credentials are encrypted with AES-256-GCM:
+
+```rust
+// Encryption
+let (encrypted_value, salt) = crypto.encrypt(plaintext)?;
+// encrypted_value = nonce (12B) || ciphertext || auth_tag (16B)
+
+// Storage
+INSERT INTO secrets (encrypted_value, key_salt, ...)
+VALUES ($1, $2, ...);
+```
+
+**Key Properties:**
+
+- **Algorithm**: AES-256-GCM (authenticated encryption)
+- **Key derivation**: HKDF-SHA256 with per-secret salt
+- **Master key**: From OS keychain or `SECRETS_MASTER_KEY` env var
+
+See [Credential Protection](/security/credential-protection) for full details.
+
+### Database Encryption at Rest
+
+IronClaw does not encrypt the database itself, but you can:
+
+**PostgreSQL:**
+
+- Enable full-disk encryption (LUKS, BitLocker, FileVault)
+- Use encrypted tablespaces
+- Encrypt database backups
+
+**libSQL:**
+
+- Store `.db` file on encrypted filesystem
+- Use Turso with server-side encryption
+
+<Info>
+  Only secrets are encrypted within the database. Conversations, workspace files, and settings are stored in plaintext (but protected by filesystem permissions).
+</Info>
+
+## Data Categories
+
+### Conversations
+
+**Tables:** `conversations`, `messages`
+
+**Contains:**
+
+- Message history (user and assistant messages)
+- Conversation metadata (title, created_at, updated_at)
+- Tool calls and results (for audit trail)
+
+**Retention:**
+
+- No automatic deletion
+- User can delete conversations manually
+- LLM context window limits apply (older messages dropped from active context)
+
+### Workspace Files
+
+**Tables:** `workspace_entries`, `memory_chunks`
+
+**Contains:**
+
+- Files stored in the workspace (notes, logs, context)
+- Vector embeddings for semantic search
+- Metadata (path, size, created_at, updated_at)
+
+**Retention:**
+
+- No automatic deletion
+- User controls file lifecycle via workspace commands
+
+<Info>
+  Embeddings are generated locally if you use a local embedding model, or via API if you use OpenAI/Voyage/etc.
+</Info>
+
+### Job History
+
+**Tables:** `jobs`, `job_events`, `llm_calls`, `sandbox_jobs`
+
+**Contains:**
+
+- Full execution log for every job
+- LLM requests/responses (input/output tokens, cost)
+- Tool invocations (parameters, results, errors)
+- Docker sandbox executions (for code execution)
+
+**Retention:**
+
+- No automatic deletion by default
+- Grows unbounded (implement custom cleanup if needed)
+
+### Secrets
+
+**Table:** `secrets`
+
+**Contains:**
+
+- Encrypted API keys, tokens, passwords
+- Metadata (provider, expires_at, last_used_at, usage_count)
+
+**Retention:**
+
+- Manual deletion only
+- Expired secrets remain in database (inaccessible)
+
+### Settings
+
+**Table:** `settings`
+
+**Contains:**
+
+- User preferences (default_model, safety_config, etc.)
+- Feature flags
+- Bootstrap configuration (copied from env on first run)
+
+**Retention:**
+
+- Persists until manually changed
+- Overrides environment variables
+
+## Privacy Guarantees
+
+### No Telemetry
+
+IronClaw has **zero telemetry or analytics**:
+
+- No usage tracking
+- No crash reporting
+- No phone-home behavior
+- No update checks
+
+<Info>
+  The only network traffic is:
+  1. LLM API calls when you send a message
+  2. HTTP requests from tools you explicitly invoke
+  3. Database connections (if using remote PostgreSQL or Turso)
+</Info>
+
+### No Data Sharing
+
+IronClaw never shares your data with:
+
+- NEAR AI (unless you explicitly use NEAR AI as your LLM provider)
+- Tool developers (tools run sandboxed with no network access by default)
+- Third-party services (unless you configure them)
+
+### LLM Provider Privacy
+
+When you use an LLM provider:
+
+- **Messages sent**: Your prompts and conversation history (within context window)
+- **Messages NOT sent**: Workspace files, secrets, job history (unless explicitly included in context)
+- **Provider policies vary**: OpenAI, Anthropic, etc. have their own data retention policies
+
+<Warning>
+  If privacy is critical, use a local LLM (Ollama) or a privacy-focused provider. Check your provider's data retention policy.
+</Warning>
+
+## Backup and Export
+
+### Database Backup
+
+**PostgreSQL:**
+
+```bash
+pg_dump ironclaw > backup.sql
+
+# Restore
+psql ironclaw < backup.sql
+```
+
+**libSQL:**
+
+```bash
+# Local file backup
+cp ~/.ironclaw/ironclaw.db backup.db
+
+# Remote replica auto-syncs to Turso
+```
+
+<Info>
+  Remember to back up your master key separately. Encrypted secrets are useless without it.
+</Info>
+
+### Exporting Data
+
+No built-in export format yet, but you can query directly:
+
+```sql
+-- Export conversations
+SELECT c.id, c.title, m.role, m.content
+FROM conversations c
+JOIN messages m ON m.conversation_id = c.id
+ORDER BY c.created_at, m.created_at;
+
+-- Export workspace files
+SELECT path, content, created_at
+FROM workspace_entries
+ORDER BY path;
+```
+
+## Data Cleanup
+
+### Manual Cleanup
+
+Delete old data to free space:
+
+```sql
+-- Delete conversations older than 90 days
+DELETE FROM conversations
+WHERE updated_at < NOW() - INTERVAL '90 days';
+
+-- Delete job history older than 30 days
+DELETE FROM jobs
+WHERE created_at < NOW() - INTERVAL '30 days';
+
+-- Delete unused secrets
+DELETE FROM secrets
+WHERE (last_used_at < NOW() - INTERVAL '90 days'
+       OR last_used_at IS NULL)
+AND expires_at IS NULL;
+```
+
+<Warning>
+  Database triggers cascade deletions (e.g., deleting a conversation also deletes its messages). Always back up before bulk deletions.
+</Warning>
+
+### Vacuum (PostgreSQL)
+
+After large deletions, reclaim space:
+
+```bash
+psql ironclaw -c "VACUUM FULL;"
+```
+
+## Security Best Practices
+
+### For Local Deployments
+
+1. **Encrypt filesystem**: Use full-disk encryption (LUKS, BitLocker, FileVault)
+2. **Restrict database access**: Set PostgreSQL to listen only on localhost
+3. **Secure master key**: Use OS keychain, not environment variables
+4. **Limit user permissions**: Run IronClaw as a non-root user
+5. **Back up regularly**: Automate daily backups to encrypted storage
+
+### For Remote Deployments
+
+1. **Use TLS for database**: Enable SSL for PostgreSQL connections
+2. **Firewall rules**: Restrict database port to trusted IPs
+3. **Rotate credentials**: Change database passwords every 90 days
+4. **Monitor access**: Log all database connections
+5. **Encrypt backups**: Always encrypt backup files before storing
+
+### For Multi-User Deployments
+
+1. **User isolation**: Each user has a separate `user_id` for all data
+2. **Row-level security**: Consider PostgreSQL RLS policies
+3. **Audit logs**: Enable `log_statement = 'all'` in PostgreSQL
+4. **Rate limiting**: Prevent one user from exhausting resources
+5. **Quota enforcement**: Limit workspace size per user
+
+## Compliance Considerations
+
+### GDPR (EU)
+
+IronClaw itself doesn't collect data, but if you deploy it for others:
+
+- **Right to access**: Provide SQL queries to export user data
+- **Right to erasure**: Delete all rows with `user_id = $1`
+- **Data portability**: Export data in machine-readable format
+- **Data minimization**: Only store what's needed (consider auto-cleanup)
+
+### HIPAA (US Healthcare)
+
+For protected health information (PHI):
+
+- **Encryption at rest**: Enable PostgreSQL tablespace encryption
+- **Encryption in transit**: Use TLS for database connections
+- **Access controls**: Implement user authentication and authorization
+- **Audit logs**: Enable comprehensive logging for all access
+- **Business Associate Agreement**: If using Turso or hosted PostgreSQL
+
+<Warning>
+  IronClaw is not HIPAA-certified. If handling PHI, consult legal counsel and consider additional security measures.
+</Warning>
+
+## Monitoring and Auditing
+
+### Database Size
+
+```sql
+-- Total database size (PostgreSQL)
+SELECT pg_size_pretty(pg_database_size('ironclaw'));
+
+-- Table sizes
+SELECT schemaname, tablename,
+       pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+FROM pg_tables
+WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+```
+
+### Activity Logs
+
+```sql
+-- Recent jobs
+SELECT id, user_id, state, created_at
+FROM jobs
+ORDER BY created_at DESC
+LIMIT 20;
+
+-- LLM usage by user
+SELECT user_id, COUNT(*), SUM(input_tokens), SUM(output_tokens)
+FROM llm_calls
+WHERE created_at > NOW() - INTERVAL '30 days'
+GROUP BY user_id;
+
+-- Most used secrets
+SELECT name, provider, usage_count, last_used_at
+FROM secrets
+ORDER BY usage_count DESC
+LIMIT 10;
+```
+
+## Disaster Recovery
+
+### Recovery Plan
+
+1. **Restore database**: From most recent backup
+2. **Restore master key**: From keychain backup or secure vault
+3. **Verify secrets**: Test decryption of a known secret
+4. **Check integrity**: Run `SELECT COUNT(*) FROM conversations;` etc.
+5. **Test functionality**: Send a test message to LLM
+
+### Recovery Time Objective (RTO)
+
+- **Local PostgreSQL**: Minutes (if backup is recent)
+- **libSQL file**: Seconds (copy backup file)
+- **Turso replica**: Automatic (server-side redundancy)
+
+### Recovery Point Objective (RPO)
+
+- **Depends on backup frequency**: Daily backups = max 24 hours data loss
+- **Continuous WAL archiving** (PostgreSQL): Near-zero data loss
+
+<Info>
+  For mission-critical deployments, enable PostgreSQL continuous archiving or use Turso's automatic replication.
+</Info>
+
+## Related Sections
+
+- [Credential Protection](/security/credential-protection) - Secrets encryption and management
+- [WASM Sandbox](/security/wasm-sandbox) - Isolated tool execution
+- [Prompt Injection Defense](/security/prompt-injection) - Input validation and sanitization

@@ -1,122 +1,129 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "IronClaw",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#31a0f7",
+    "light": "#a2d4fc",
+    "dark": "#0c90f8"
   },
-  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "https://media.brand.dev/c07611c7-1c14-4420-b643-6cb6f37f1b90.png",
+    "dark": "https://media.brand.dev/c07611c7-1c14-4420-b643-6cb6f37f1b90.png"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/logicminds/ironclaw"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/logicminds/ironclaw"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/philosophy",
+              "concepts/architecture",
+              "concepts/security"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Configuration",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "configuration/onboarding",
+              "configuration/llm-providers",
+              "configuration/database",
+              "configuration/environment-variables"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Features",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "features/channels",
+              "features/tools",
+              "features/workspace-memory",
+              "features/routines",
+              "features/sandbox"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "security/wasm-sandbox",
+              "security/prompt-injection",
+              "security/credential-protection",
+              "security/data-protection"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/building-tools",
+              "guides/building-channels",
+              "guides/mcp-servers",
+              "guides/telegram-setup",
+              "guides/docker-sandbox"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "CLI Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Commands",
             "pages": [
-              "api-reference/introduction"
+              "cli/run",
+              "cli/onboard",
+              "cli/config",
+              "cli/tool",
+              "cli/mcp",
+              "cli/memory",
+              "cli/service",
+              "cli/status",
+              "cli/doctor"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Components",
+            "pages": [
+              "api/agent",
+              "api/tools",
+              "api/channels",
+              "api/workspace"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Tools",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/tools/builtin",
+              "api/tools/wasm",
+              "api/tools/mcp"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

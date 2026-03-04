@@ -1,0 +1,347 @@
+---
+title: Telegram Channel Setup
+description: Configure the Telegram channel for IronClaw with webhooks, polling, and DM pairing
+---
+
+The Telegram channel lets you interact with IronClaw via Telegram direct messages and groups.
+
+## Features
+
+- **Webhook mode** (recommended): Instant message delivery via tunnel
+- **Polling mode**: No tunnel required, ~30s delay
+- **DM pairing**: Approve unknown users before they can message the agent
+- **Group mentions**: `@YourBot` or `/command` to trigger in groups
+
+## Prerequisites
+
+- IronClaw installed and configured (`ironclaw onboard`)
+- A Telegram bot token from [@BotFather](https://t.me/BotFather)
+
+## Step 1: Create a Telegram Bot
+
+1. Open Telegram and message [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` and follow the prompts
+3. Choose a name (e.g., "My IronClaw Bot")
+4. Choose a username (e.g., "my_ironclaw_bot")
+5. Copy the bot token (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+
+## Step 2: Configure via Setup Wizard
+
+```bash
+ironclaw onboard
+```
+
+When prompted:
+
+1. **Enable Telegram channel**: Select "Yes"
+2. **Enter bot token**: Paste the token from BotFather
+3. **Webhook secret**: Press Enter to auto-generate (or provide your own)
+4. **Tunnel URL** (optional): If you want webhook mode, configure a tunnel
+
+The wizard validates the token and saves it encrypted.
+
+## Step 3: Choose Delivery Mode
+
+### Webhook Mode (Recommended)
+
+Instant message delivery. Requires exposing your agent via a tunnel.
+
+**Set up tunnel:**
+
+```bash
+# Using ngrok
+ngrok http 8080
+
+# Using Cloudflare Tunnel
+cloudflared tunnel --url http://localhost:8080
+```
+
+**Configure tunnel URL:**
+
+```bash
+# In .env or environment
+export TUNNEL_URL=https://your-subdomain.ngrok.io
+
+# Or in setup wizard
+ironclaw onboard
+```
+
+IronClaw automatically registers the webhook with Telegram.
+
+### Polling Mode
+
+No tunnel required. The agent checks for new messages every ~30 seconds.
+
+**To use polling**: Don't configure a `TUNNEL_URL`. IronClaw falls back to polling automatically.
+
+## Step 4: Test the Bot
+
+1. Open Telegram and search for your bot by username
+2. Send a message: "Hello!"
+3. Check IronClaw logs for the message
+4. The agent should respond
+
+## DM Pairing
+
+By default, unknown users must be approved before they can message the agent.
+
+### How It Works
+
+1. **Unknown user** sends a message to your bot
+2. **Bot replies**: `To pair with this bot, run: ironclaw pairing approve telegram ABC12345`
+3. **You approve**: `ironclaw pairing approve telegram ABC12345`
+4. **User is added** to the allow list; future messages are delivered
+
+### Pairing Commands
+
+```bash
+# List pending pairing requests
+ironclaw pairing list telegram
+
+# List as JSON
+ironclaw pairing list telegram --json
+
+# Approve a user by code
+ironclaw pairing approve telegram ABC12345
+
+# The user can now message your bot
+```
+
+### Pairing Policies
+
+Edit `~/.ironclaw/channels/telegram.capabilities.json` (or configure in the database):
+
+```json
+{
+  "config": {
+    "dm_policy": "pairing",
+    "allow_from": [],
+    "owner_id": null,
+    "bot_username": "my_ironclaw_bot",
+    "respond_to_all_group_messages": false
+  }
+}
+```
+
+**Options:**
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `dm_policy` | `open`, `allowlist`, `pairing` | `pairing` | `open` = allow all; `allowlist` = config + approved only; `pairing` = send pairing reply to unknown |
+| `allow_from` | `["user_id", "username", "*"]` | `[]` | Pre-approved IDs/usernames. `*` allows everyone. |
+| `owner_id` | Telegram user ID | `null` | When set, only this user can message (overrides dm_policy) |
+| `bot_username` | Bot username (no @) | `null` | For mention detection in groups |
+| `respond_to_all_group_messages` | `true`/`false` | `false` | When true, respond to all group messages; when false, only @mentions and /commands |
+
+### Policy Examples
+
+**Open to everyone:**
+
+```json
+{
+  "config": {
+    "dm_policy": "open"
+  }
+}
+```
+
+**Pre-approved users only:**
+
+```json
+{
+  "config": {
+    "dm_policy": "allowlist",
+    "allow_from": ["123456789", "@alice", "@bob"]
+  }
+}
+```
+
+**Single owner:**
+
+```json
+{
+  "config": {
+    "owner_id": 123456789
+  }
+}
+```
+
+## Group Chat
+
+Add your bot to a group and mention it to interact:
+
+```
+@my_ironclaw_bot What's the weather?
+```
+
+Or use commands:
+
+```
+/status
+/help
+```
+
+**Configuration:**
+
+- Set `bot_username` in config to enable mention detection
+- Set `respond_to_all_group_messages: true` to respond to all messages (not just mentions)
+
+## Manual Installation
+
+If the channel isn't bundled or you want to build from source:
+
+```bash
+# Add WASM target
+rustup target add wasm32-wasip2
+
+# Build Telegram channel
+cd channels-src/telegram
+cargo build --release --target wasm32-wasip2
+
+# Install
+mkdir -p ~/.ironclaw/channels
+cp target/wasm32-wasip2/release/telegram.wasm ~/.ironclaw/channels/telegram.wasm
+cp telegram.capabilities.json ~/.ironclaw/channels/
+```
+
+## Secrets
+
+The channel expects these secrets:
+
+- **telegram_bot_token**: Required. Your bot token from BotFather.
+- **telegram_webhook_secret**: Optional. Used to validate webhook requests.
+
+**Configure via:**
+
+1. **Setup wizard**: `ironclaw onboard`
+2. **Environment**: `export TELEGRAM_BOT_TOKEN=your_token`
+3. **Database**: Stored encrypted if using the wizard
+
+## Webhook Secret
+
+For webhook validation, Telegram sends `X-Telegram-Bot-Api-Secret-Token` with each request. IronClaw validates it before forwarding to the channel.
+
+**To set a custom secret:**
+
+```bash
+export TELEGRAM_WEBHOOK_SECRET=your_secret_here
+ironclaw onboard  # Or add to existing config
+```
+
+**Auto-generate** (recommended): Leave empty during setup, IronClaw generates a secure 32-byte secret.
+
+## Troubleshooting
+
+### Messages Not Delivered
+
+**Polling mode:**
+
+1. Check logs for `getUpdates` errors
+2. Verify bot token: `curl https://api.telegram.org/bot<TOKEN>/getMe`
+3. Ensure IronClaw is running
+
+**Webhook mode:**
+
+1. Verify tunnel is running and accessible
+2. Check `TUNNEL_URL` is correct and includes `https://`
+3. Test webhook: `curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo`
+4. Telegram requires HTTPS (no self-signed certs)
+
+### Pairing Code Not Received
+
+1. Verify `dm_policy` is `pairing` (not `allowlist`)
+2. Check the channel can send messages (logs should show "Sent pairing message")
+3. Ensure HTTP allowlist includes `api.telegram.org` in capabilities
+
+### Group Mentions Not Working
+
+1. Set `bot_username` in config to your bot's username (no `@`)
+2. Ensure the message contains `@YourBot` or starts with `/`
+3. Verify the bot is a member of the group
+
+### "Connection Refused" on Startup
+
+**Webhook mode**: Start your tunnel before `ironclaw run`
+
+**Polling mode**: No tunnel needed; ignore tunnel-related warnings
+
+### Bot Token Invalid
+
+**Error: "Invalid bot token"**
+
+1. Verify the token format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`
+2. Check for extra spaces or newlines
+3. Get a new token: Message [@BotFather](https://t.me/BotFather) and send `/token`
+
+## Advanced Configuration
+
+### Custom Polling Interval
+
+Edit `telegram.capabilities.json`:
+
+```json
+{
+  "config": {
+    "poll_interval_ms": 10000
+  }
+}
+```
+
+Default: 30000ms (30 seconds). Lower values increase API usage.
+
+### Rate Limits
+
+Edit `telegram.capabilities.json`:
+
+```json
+{
+  "capabilities": {
+    "http": {
+      "rate_limit": {
+        "requests_per_minute": 30,
+        "requests_per_hour": 1000
+      }
+    },
+    "channel": {
+      "emit_rate_limit": {
+        "messages_per_minute": 50,
+        "messages_per_hour": 3000
+      }
+    }
+  }
+}
+```
+
+Protects against abuse and respects Telegram's API limits.
+
+### Multiple Bots
+
+Run multiple IronClaw instances with different bot tokens:
+
+```bash
+# Bot 1
+export TELEGRAM_BOT_TOKEN=token1
+export DATABASE_URL=postgresql://localhost/ironclaw_bot1
+ironclaw run
+
+# Bot 2
+export TELEGRAM_BOT_TOKEN=token2
+export DATABASE_URL=postgresql://localhost/ironclaw_bot2
+ironclaw run
+```
+
+Each instance is isolated with its own database and configuration.
+
+## Security Considerations
+
+1. **Keep bot token secret**: Never commit to git or share publicly
+2. **Use webhook secret**: Prevents unauthorized webhook requests
+3. **Enable DM pairing**: Prevents spam and unauthorized access
+4. **Set owner_id**: For maximum security, restrict to a single user
+5. **Monitor logs**: Watch for suspicious activity
+
+## Next Steps
+
+- Learn about [building channels](/guides/building-channels) to create your own
+- Explore [building WASM tools](/guides/building-tools) for custom capabilities
+- Set up [MCP servers](/guides/mcp-servers) for external integrations

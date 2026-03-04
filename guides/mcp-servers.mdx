@@ -1,0 +1,419 @@
+---
+title: MCP Server Integration
+description: Connect Model Context Protocol servers to extend IronClaw's capabilities
+---
+
+MCP (Model Context Protocol) servers provide additional tools and capabilities without requiring custom WASM development. IronClaw supports both pre-configured OAuth servers and unauthenticated localhost servers.
+
+## Overview
+
+MCP servers are external processes that provide:
+- Tools with JSON schemas
+- Resources (files, data)
+- Prompts and templates
+
+IronClaw connects via HTTP and makes their tools available to the agent.
+
+## Quick Start
+
+### Add a Server
+
+```bash
+# Unauthenticated server (localhost)
+ironclaw mcp add local-server http://localhost:8080
+
+# Authenticated server with OAuth
+ironclaw mcp add notion https://mcp.notion.com \
+  --client-id YOUR_CLIENT_ID \
+  --auth-url https://api.notion.com/v1/oauth/authorize \
+  --token-url https://api.notion.com/v1/oauth/token
+```
+
+### Authenticate (OAuth)
+
+```bash
+ironclaw mcp auth notion
+```
+
+This opens your browser for OAuth login.
+
+### Test Connection
+
+```bash
+ironclaw mcp test notion
+```
+
+### List Servers
+
+```bash
+ironclaw mcp list
+ironclaw mcp list --verbose
+```
+
+## Server Configuration
+
+### OAuth Server
+
+For servers requiring authentication:
+
+```bash
+ironclaw mcp add github-copilot https://api.githubcopilot.com/mcp/ \
+  --client-id your-client-id \
+  --scopes "read,write"
+```
+
+OAuth configuration:
+- **client_id**: Your OAuth app client ID
+- **auth_url**: Authorization endpoint (optional, can be discovered)
+- **token_url**: Token endpoint (optional, can be discovered)
+- **scopes**: Comma-separated list of scopes
+
+### Localhost Server
+
+For development servers:
+
+```bash
+ironclaw mcp add local http://localhost:3000
+```
+
+Localhost servers (127.0.0.1, ::1) don't require authentication.
+
+### Dynamic Client Registration (DCR)
+
+Remote HTTPS servers without pre-configured OAuth can use DCR:
+
+```bash
+# Just add the server URL
+ironclaw mcp add new-service https://mcp.example.com
+
+# Authenticate (DCR happens automatically)
+ironclaw mcp auth new-service
+```
+
+IronClaw will:
+1. Discover OAuth endpoints via `.well-known/oauth-authorization-server`
+2. Register a client dynamically
+3. Complete the OAuth flow
+4. Store tokens securely
+
+## Authentication Flow
+
+When you run `ironclaw mcp auth <server>`:
+
+1. **Check environment variable**: If the server's `env_var` is set, use that token
+2. **Use stored tokens**: If previously authenticated, use stored access/refresh tokens
+3. **OAuth flow**: Open browser for login, exchange code for tokens
+4. **DCR fallback**: If no OAuth config, try Dynamic Client Registration
+
+Tokens are stored encrypted in the database.
+
+## Managing Servers
+
+### Enable/Disable
+
+```bash
+ironclaw mcp toggle notion --disable
+ironclaw mcp toggle notion --enable
+```
+
+### Remove
+
+```bash
+ironclaw mcp remove notion
+```
+
+### View Details
+
+```bash
+ironclaw mcp list --verbose
+```
+
+Output:
+
+```
+● notion - https://mcp.notion.com (auth required)
+    URL: https://mcp.notion.com
+    OAuth Client ID: your-client-id
+    Scopes: read, write
+
+○ local - http://localhost:8080
+    URL: http://localhost:8080
+```
+
+## Configuration Storage
+
+MCP server configurations are stored:
+
+1. **Database** (preferred): If connected, stored in the `settings` table
+2. **File** (fallback): `~/.ironclaw/mcp-servers.json`
+
+Format:
+
+```json
+{
+  "schema_version": 1,
+  "servers": [
+    {
+      "name": "notion",
+      "url": "https://mcp.notion.com",
+      "oauth": {
+        "client_id": "your-client-id",
+        "authorization_url": "https://api.notion.com/v1/oauth/authorize",
+        "token_url": "https://api.notion.com/v1/oauth/token",
+        "scopes": ["read", "write"],
+        "use_pkce": true,
+        "extra_params": {}
+      },
+      "enabled": true,
+      "description": "Notion workspace integration"
+    }
+  ]
+}
+```
+
+## Using MCP Tools
+
+Once configured, MCP tools appear in the agent's tool list:
+
+```
+User: Search my Notion workspace for "project plan"
+
+Agent: I'll use the notion_search tool...
+[Uses the MCP server's search tool]
+```
+
+The agent sees:
+
+```json
+{
+  "name": "notion_search",
+  "description": "Search Notion pages",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search query"
+      }
+    },
+    "required": ["query"]
+  }
+}
+```
+
+## MCP vs WASM Tools
+
+Both are first-class in IronClaw's extension system, but have different strengths:
+
+### WASM Tools (IronClaw Native)
+
+**Pros:**
+- Sandboxed: fuel metering, memory limits, capability-based permissions
+- Credentials injected by host, tool never sees the token
+- Output scanned for secret leakage
+- Single binary, no process management
+- Works offline
+
+**Cons:**
+- Must build in Rust
+- No ecosystem (yet)
+- Synchronous only
+
+### MCP Servers
+
+**Pros:**
+- Growing ecosystem (GitHub, Notion, Postgres, etc.)
+- Any language (TypeScript, Python most common)
+- Supports streaming, websockets, background polling
+- Pre-built servers available
+
+**Cons:**
+- External process with full system access
+- Manages own credentials (IronClaw can't prevent leaks)
+- Network overhead
+
+### Decision Guide
+
+| Scenario | Use |
+|----------|-----|
+| Good MCP server exists | **MCP** |
+| Handles sensitive credentials | **WASM** |
+| Quick prototype | **MCP** |
+| Core capability, long-term | **WASM** |
+| Needs streaming/websockets | **MCP** |
+| Multiple tools share OAuth token | **WASM** |
+
+## OAuth Setup
+
+### Creating an OAuth App
+
+Most services require OAuth app registration:
+
+1. **Register app** with the service (e.g., Notion, GitHub)
+2. **Set redirect URIs**: `http://localhost:9876/callback` through `http://localhost:9886/callback` (IronClaw tries multiple ports)
+3. **Copy client ID and secret**
+4. **Configure environment** (if needed):
+
+```bash
+export NOTION_OAUTH_CLIENT_ID=your-client-id
+export NOTION_OAUTH_CLIENT_SECRET=your-client-secret
+```
+
+### Service-Specific Guides
+
+#### Notion
+
+1. Go to [Notion Integrations](https://www.notion.so/my-integrations)
+2. Create "Public Integration"
+3. Add redirect URIs: `http://localhost:9876/callback` to `9886`
+4. Copy Client ID and Secret
+
+```bash
+ironclaw mcp add notion https://mcp.notion.com \
+  --client-id YOUR_CLIENT_ID \
+  --auth-url https://api.notion.com/v1/oauth/authorize \
+  --token-url https://api.notion.com/v1/oauth/token
+
+ironclaw mcp auth notion
+```
+
+#### GitHub
+
+1. Go to [GitHub OAuth Apps](https://github.com/settings/developers)
+2. Create "OAuth App"
+3. Set Authorization callback URL: `http://localhost:9876/callback`
+4. Copy Client ID and Secret
+
+```bash
+ironclaw mcp add github https://api.github.com/mcp \
+  --client-id YOUR_CLIENT_ID \
+  --auth-url https://github.com/login/oauth/authorize \
+  --token-url https://github.com/login/oauth/access_token \
+  --scopes "repo,read:org"
+
+ironclaw mcp auth github
+```
+
+## Troubleshooting
+
+### Authentication Failed
+
+**OAuth error or 401 responses**:
+
+1. Check client ID/secret are correct
+2. Verify redirect URIs include `http://localhost:9876/callback` through `9886`
+3. Re-authenticate: `ironclaw mcp auth <server>`
+
+### Connection Failed
+
+**Can't connect to server**:
+
+1. Check the server URL is correct and accessible
+2. For remote servers, ensure HTTPS (HTTP only allowed for localhost)
+3. Test manually: `curl https://mcp.example.com/health`
+
+### Token Expired
+
+**Stored tokens no longer work**:
+
+```bash
+ironclaw mcp auth <server>  # Re-authenticate
+```
+
+IronClaw automatically refreshes tokens when possible.
+
+### Server Not Found
+
+**"Server 'name' not found"**:
+
+```bash
+ironclaw mcp list  # Check server name
+ironclaw mcp add <name> <url>  # Add if missing
+```
+
+## Advanced Configuration
+
+### PKCE (Proof Key for Code Exchange)
+
+PKCE is enabled by default (OAuth 2.1 requirement). To disable:
+
+Edit `~/.ironclaw/mcp-servers.json`:
+
+```json
+{
+  "name": "legacy-server",
+  "oauth": {
+    "use_pkce": false
+  }
+}
+```
+
+### Extra OAuth Parameters
+
+Some servers require additional parameters:
+
+```bash
+ironclaw mcp add notion https://mcp.notion.com \
+  --client-id YOUR_ID
+```
+
+Then edit `~/.ironclaw/mcp-servers.json`:
+
+```json
+{
+  "name": "notion",
+  "oauth": {
+    "extra_params": {
+      "owner": "user"
+    }
+  }
+}
+```
+
+### Token Storage
+
+Tokens are stored with these secret names:
+
+- Access token: `mcp_<server_name>_access_token`
+- Refresh token: `mcp_<server_name>_refresh_token`
+- Client ID (DCR): `mcp_<server_name>_client_id`
+
+All secrets are encrypted with AES-256-GCM using the master key.
+
+## Building Your Own MCP Server
+
+See the [MCP Protocol Specification](https://modelcontextprotocol.org) for details.
+
+Basic server structure:
+
+```typescript
+import { MCPServer } from '@modelcontextprotocol/server';
+
+const server = new MCPServer({
+  name: 'my-server',
+  version: '1.0.0',
+});
+
+server.addTool({
+  name: 'my_tool',
+  description: 'Does something useful',
+  parameters: {
+    type: 'object',
+    properties: {
+      query: { type: 'string' },
+    },
+    required: ['query'],
+  },
+  handler: async (params) => {
+    return { result: `Processed: ${params.query}` };
+  },
+});
+
+server.listen(8080);
+```
+
+## Next Steps
+
+- Learn about [building WASM tools](/guides/building-tools) for tighter integration
+- Explore [Docker sandbox](/guides/docker-sandbox) for secure command execution
+- Set up [Telegram channel](/guides/telegram-setup) for messaging

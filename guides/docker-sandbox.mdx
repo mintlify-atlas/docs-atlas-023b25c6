@@ -1,0 +1,463 @@
+---
+title: Docker Sandbox
+description: Secure command execution in isolated Docker containers with credential protection
+---
+
+The Docker sandbox provides isolated execution for untrusted commands with multiple layers of security.
+
+## Overview
+
+The sandbox system:
+- Runs commands in ephemeral Docker containers
+- Routes network traffic through a validating proxy
+- Injects credentials at the proxy boundary (never in containers)
+- Enforces resource limits (memory, CPU, timeout)
+- Scans for credential leakage in requests/responses
+
+## Architecture
+
+```
+┌───────────────────────────────────────────────────────┐
+│                   SandboxManager                      │
+│                                                       │
+│  execute(cmd, cwd, policy)                            │
+│         │                                             │
+│         ▼                                             │
+│   ┌──────────────┐     ┌──────────────────────────┐  │
+│   │ Start Proxy  │────▶│ Create Container         │  │
+│   │ (if needed)  │     │ • Non-root (UID 1000)    │  │
+│   └──────────────┘     │ • Read-only root FS      │  │
+│                        │ • Network via proxy      │  │
+│                        │ • Resource limits        │  │
+│                        └──────────┬───────────────┘  │
+│                                   ▼                   │
+│                        ┌──────────────────────────┐  │
+│                        │ Execute & Collect Output │  │
+│                        └──────────┬───────────────┘  │
+│                                   ▼                   │
+│                        ┌──────────────────────────┐  │
+│                        │ Cleanup Container        │  │
+│                        └──────────────────────────┘  │
+└───────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────┐
+│                   Network Proxy                       │
+│                                                       │
+│  Container Request                                    │
+│         │                                             │
+│         ▼                                             │
+│   ┌──────────────────┐                                │
+│   │ Allowlist Check  │                                │
+│   └──────┬───────────┘                                │
+│          ▼                                             │
+│   ┌──────────────────┐                                │
+│   │ Leak Scan        │ (check for secrets)            │
+│   └──────┬───────────┘                                │
+│          ▼                                             │
+│   ┌──────────────────┐                                │
+│   │ Inject Creds     │ (replace placeholders)         │
+│   └──────┬───────────┘                                │
+│          ▼                                             │
+│   ┌──────────────────┐                                │
+│   │ Execute Request  │                                │
+│   └──────┬───────────┘                                │
+│          ▼                                             │
+│   ┌──────────────────┐                                │
+│   │ Leak Scan        │ (check response)               │
+│   └──────┬───────────┘                                │
+│          ▼                                             │
+│   Return to Container                                 │
+└───────────────────────────────────────────────────────┘
+```
+
+## Sandbox Policies
+
+Three policies control filesystem and network access:
+
+| Policy | Filesystem | Network | Use Case |
+|--------|------------|---------|----------|
+| `ReadOnly` | `/workspace` (ro) | Proxied (allowlist) | Explore code, fetch docs |
+| `WorkspaceWrite` | `/workspace` (rw) | Proxied (allowlist) | Build software, run tests |
+| `FullAccess` | Full host | Full network | Direct execution (no sandbox) |
+
+## Quick Start
+
+### Prerequisites
+
+- Docker installed and running
+- Docker image built: `docker build -t ironclaw-worker:latest -f Dockerfile.worker .`
+
+### Check Docker Status
+
+```bash
+ironclaw doctor
+```
+
+Output:
+
+```
+✓ Docker is available
+✓ Docker image 'ironclaw-worker:latest' found
+✓ Sandbox is enabled
+```
+
+### Enable Sandbox
+
+Edit `~/.ironclaw/.env` or set environment:
+
+```bash
+export SANDBOX_ENABLED=true
+export SANDBOX_POLICY=workspace_write
+export SANDBOX_IMAGE=ironclaw-worker:latest
+```
+
+Or configure via wizard:
+
+```bash
+ironclaw onboard
+```
+
+## Usage
+
+### Execute Commands
+
+The agent automatically uses the sandbox for commands:
+
+```
+User: Run cargo build in /workspace/my-project
+
+Agent: I'll build the project in a sandboxed environment...
+[Uses Docker sandbox]
+```
+
+### Manual Execution (CLI)
+
+For testing:
+
+```bash
+# Simple command
+ironclaw exec "ls -la" --workdir /workspace
+
+# With policy
+ironclaw exec "cargo build --release" --policy workspace_write
+
+# Full access (no sandbox)
+ironclaw exec "docker ps" --policy full_access
+```
+
+### Programmatic Usage
+
+```rust
+use ironclaw::sandbox::{SandboxManager, SandboxManagerBuilder, SandboxPolicy};
+use std::path::Path;
+
+let manager = SandboxManagerBuilder::new()
+    .enabled(true)
+    .policy(SandboxPolicy::WorkspaceWrite)
+    .build();
+
+manager.initialize().await?;
+
+let result = manager.execute(
+    "cargo build --release",
+    Path::new("/workspace/my-project"),
+    HashMap::new(),
+).await?;
+
+println!("Exit code: {}", result.exit_code);
+println!("Output: {}", result.output);
+```
+
+## Configuration
+
+### Environment Variables
+
+```bash
+# Enable/disable sandbox
+SANDBOX_ENABLED=true
+
+# Security policy
+SANDBOX_POLICY=workspace_write  # or: readonly, full_access
+
+# Docker image
+SANDBOX_IMAGE=ironclaw-worker:latest
+
+# Auto-pull image if not found
+SANDBOX_AUTO_PULL=true
+
+# Timeout (seconds)
+SANDBOX_TIMEOUT=120
+
+# Memory limit (MB)
+SANDBOX_MEMORY_LIMIT_MB=2048
+
+# CPU shares (relative weight)
+SANDBOX_CPU_SHARES=1024
+
+# Network proxy port (0 = auto)
+SANDBOX_PROXY_PORT=0
+```
+
+### Network Allowlist
+
+The proxy allows requests to specific domains. Default allowlist includes:
+
+**Package registries:**
+- crates.io, static.crates.io, index.crates.io
+- registry.npmjs.org
+- proxy.golang.org
+- pypi.org, files.pythonhosted.org
+
+**Documentation:**
+- docs.rs, doc.rust-lang.org
+- nodejs.org, docs.python.org
+- go.dev
+
+**Version control:**
+- github.com, raw.githubusercontent.com
+- gitlab.com
+
+**Build tools:**
+- dl.google.com (Android SDK)
+- download.qt.io
+
+**Extend the allowlist:**
+
+Edit `src/sandbox/config.rs` and rebuild, or configure via environment:
+
+```bash
+export SANDBOX_ALLOWLIST="crates.io,npmjs.org,api.example.com"
+```
+
+## Resource Limits
+
+Default limits:
+
+```rust
+ResourceLimits {
+    memory_bytes: 2 * 1024 * 1024 * 1024,  // 2 GB
+    cpu_shares: 1024,                       // Default weight
+    timeout: Duration::from_secs(120),      // 2 minutes
+    max_output_bytes: 64 * 1024,            // 64 KB
+}
+```
+
+Customize via environment:
+
+```bash
+export SANDBOX_MEMORY_LIMIT_MB=4096
+export SANDBOX_TIMEOUT=300
+export SANDBOX_CPU_SHARES=2048
+```
+
+## Credential Injection
+
+Credentials are never passed to containers as environment variables. Instead:
+
+1. **Container makes request** with placeholder: `https://api.github.com/user?token={GITHUB_TOKEN}`
+2. **Proxy intercepts** and checks allowlist
+3. **Proxy scans** for leaked secrets in request
+4. **Proxy replaces** `{GITHUB_TOKEN}` with actual token
+5. **Proxy executes** request to external API
+6. **Proxy scans** response for leaked secrets
+7. **Proxy returns** response to container
+
+Credentials are **never visible inside the container**.
+
+## Security Properties
+
+### Isolation
+
+- **Non-root execution**: Containers run as UID 1000
+- **Read-only root**: Container filesystem is immutable
+- **Dropped capabilities**: All Linux capabilities removed
+- **No host network**: Container uses internal network
+- **Ephemeral**: Containers are removed after execution
+
+### Credential Protection
+
+- **No environment variables**: Secrets not passed via ENV
+- **Proxy injection**: Secrets replaced at proxy boundary
+- **Leak detection**: Outgoing requests scanned for secrets
+- **Response scanning**: Incoming data checked for leakage
+
+### Network Control
+
+- **Allowlist enforcement**: Only approved domains accessible
+- **Path prefix matching**: Restrict to specific API endpoints
+- **Rate limiting**: Per-domain and global limits
+- **HTTPS enforcement**: No plain HTTP to remote hosts
+
+### Resource Control
+
+- **Memory limits**: Hard cap on container memory
+- **CPU limits**: Relative CPU shares
+- **Timeout enforcement**: Commands killed after timeout
+- **Output truncation**: Large outputs are truncated
+
+## Building the Worker Image
+
+### Dockerfile.worker
+
+```dockerfile
+FROM rust:1.85-slim
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Non-root user
+RUN useradd -m -u 1000 -s /bin/bash worker
+
+WORKDIR /workspace
+
+USER worker
+
+CMD ["/bin/bash"]
+```
+
+### Build
+
+```bash
+docker build -t ironclaw-worker:latest -f Dockerfile.worker .
+```
+
+### Verify
+
+```bash
+docker run --rm ironclaw-worker:latest whoami
+# Output: worker
+```
+
+## Troubleshooting
+
+### Docker Not Available
+
+**Error: "Docker is not available"**
+
+1. Ensure Docker is installed: `docker --version`
+2. Start Docker daemon: `sudo systemctl start docker` (Linux) or start Docker Desktop (Mac/Windows)
+3. Check permissions: `docker ps` (should not require sudo)
+4. Run doctor: `ironclaw doctor`
+
+### Image Not Found
+
+**Error: "Image 'ironclaw-worker:latest' not found"**
+
+```bash
+docker build -t ironclaw-worker:latest -f Dockerfile.worker .
+```
+
+Or enable auto-pull:
+
+```bash
+export SANDBOX_AUTO_PULL=true
+```
+
+### Network Requests Blocked
+
+**Error: "Host not in allowlist"**
+
+1. Check the allowlist includes the host
+2. Add to allowlist in `src/sandbox/config.rs`
+3. For testing, use `full_access` policy (disables sandbox)
+
+### Timeout
+
+**Error: "Command timed out"**
+
+1. Increase timeout: `export SANDBOX_TIMEOUT=300`
+2. Check if the command is hanging
+3. Test outside sandbox: `ironclaw exec --policy full_access`
+
+### Permission Denied
+
+**Error: "Permission denied" writing to /workspace**
+
+1. Use `workspace_write` policy: `export SANDBOX_POLICY=workspace_write`
+2. Check ownership: `ls -la /workspace`
+3. Fix permissions: `chown -R 1000:1000 /workspace`
+
+## Advanced Usage
+
+### Custom Proxy Configuration
+
+```rust
+use ironclaw::sandbox::proxy::{
+    NetworkProxyBuilder,
+    DomainAllowlist,
+    EnvCredentialResolver,
+};
+
+let proxy = NetworkProxyBuilder::new()
+    .allowlist(DomainAllowlist::from_domains(vec![
+        "api.example.com",
+        "cdn.example.com",
+    ]))
+    .credential_resolver(EnvCredentialResolver::new())
+    .port(8888)
+    .build();
+
+proxy.start().await?;
+```
+
+### Per-Command Policies
+
+```rust
+let result = manager.execute_with_policy(
+    "cargo build",
+    Path::new("/workspace"),
+    SandboxPolicy::WorkspaceWrite,
+    HashMap::new(),
+).await?;
+```
+
+### Custom Resource Limits
+
+```rust
+let limits = ResourceLimits {
+    memory_bytes: 4 * 1024 * 1024 * 1024,  // 4 GB
+    cpu_shares: 2048,
+    timeout: Duration::from_secs(600),      // 10 minutes
+    max_output_bytes: 128 * 1024,           // 128 KB
+};
+
+let result = manager.execute_with_limits(
+    "cargo test",
+    Path::new("/workspace"),
+    limits,
+).await?;
+```
+
+## Performance Considerations
+
+1. **Container startup**: ~1-2 seconds per execution
+2. **Network proxy**: Minimal overhead (~10ms per request)
+3. **Credential scanning**: Fast regex matching
+4. **Output collection**: Streamed, not buffered
+
+**Optimization tips:**
+
+- Reuse containers when possible (future feature)
+- Use polling instead of creating containers per message
+- Batch commands where feasible
+- Keep allowlist focused (fewer regex matches)
+
+## Best Practices
+
+1. **Use sandbox by default**: Only disable for trusted operations
+2. **Minimal allowlist**: Only add domains you need
+3. **Set timeouts**: Prevent runaway commands
+4. **Monitor logs**: Watch for policy violations
+5. **Test policies**: Verify commands work with least privilege
+6. **Keep images updated**: Rebuild worker image regularly
+7. **Limit memory**: Prevent OOM on host
+
+## Next Steps
+
+- Learn about [building WASM tools](/guides/building-tools) for custom capabilities
+- Explore [MCP servers](/guides/mcp-servers) for external integrations
+- Set up [Telegram channel](/guides/telegram-setup) for messaging
+- Read [building channels](/guides/building-channels) to create your own

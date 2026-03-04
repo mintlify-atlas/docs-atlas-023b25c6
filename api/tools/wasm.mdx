@@ -1,0 +1,400 @@
+---
+title: 'WASM Tool API'
+description: 'Sandboxed WASM-based tool execution system'
+---
+
+## Overview
+
+The WASM tool system provides secure sandboxed execution for untrusted tools using Wasmtime. It follows patterns from NEAR blockchain and modern WASM best practices:
+
+- **Compile once, instantiate fresh**: Tools are validated and compiled at registration time. Each execution creates a fresh instance.
+- **Fuel metering**: CPU usage is limited via Wasmtime's fuel system.
+- **Memory limits**: Memory growth is bounded via ResourceLimiter.
+- **Capability-based security**: Features are opt-in via Capabilities.
+- **Extended host API**: Log, time, workspace, HTTP, tool invoke, secrets.
+
+## Architecture
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              WASM Tool Execution                             │
+│                                                                              │
+│   WASM Tool ──▶ Host Function ──▶ Allowlist ──▶ Credential ──▶ Execute     │
+│   (untrusted)   (boundary)        Validator     Injector       Request      │
+│                                                                    │        │
+│                                                                    ▼        │
+│                              ◀────── Leak Detector ◀────── Response        │
+│                          (sanitized, no secrets)                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Security Constraints
+
+| Threat | Mitigation |
+|--------|------------|
+| CPU exhaustion | Fuel metering |
+| Memory exhaustion | ResourceLimiter, 10MB default |
+| Infinite loops | Epoch interruption + tokio timeout |
+| Filesystem access | No WASI FS, only host workspace_read |
+| Network access | Allowlisted endpoints only |
+| Credential exposure | Injection at host boundary only |
+| Secret exfiltration | Leak detector scans all outputs |
+| Log spam | Max 1000 entries, 4KB per message |
+| Path traversal | Validate paths (no `..`, no `/` prefix) |
+| Trap recovery | Discard instance, never reuse |
+| Side channels | Fresh instance per execution |
+| Rate abuse | Per-tool rate limiting |
+| WASM tampering | BLAKE3 hash verification on load |
+
+## WasmToolRuntime
+
+The runtime manages WASM compilation and execution.
+
+### Constructor
+
+```rust src/tools/wasm/runtime.rs
+pub fn new(config: WasmRuntimeConfig) -> Result<Self, WasmError>
+```
+
+Creates a new WASM runtime with the specified configuration.
+
+<ParamField path="config" type="WasmRuntimeConfig" required>
+  Runtime configuration including engine settings and security limits
+</ParamField>
+
+**Returns:** `Result<WasmToolRuntime, WasmError>`
+
+### prepare
+
+```rust src/tools/wasm/runtime.rs
+pub async fn prepare(
+    &self,
+    name: &str,
+    wasm_bytes: &[u8],
+    limits: Option<ResourceLimits>,
+) -> Result<PreparedModule, WasmError>
+```
+
+Validates and compiles a WASM component. This is done once at registration time.
+
+<ParamField path="name" type="&str" required>
+  Tool name for error messages
+</ParamField>
+
+<ParamField path="wasm_bytes" type="&[u8]" required>
+  Raw WASM component bytes
+</ParamField>
+
+<ParamField path="limits" type="Option<ResourceLimits>">
+  Optional resource limits (uses defaults if None)
+</ParamField>
+
+**Returns:** `Result<PreparedModule, WasmError>` - Compiled module ready for execution
+
+## WasmToolWrapper
+
+Wraps a WASM component as a Tool implementation.
+
+### Constructor
+
+```rust src/tools/wasm/wrapper.rs
+pub fn new(
+    runtime: Arc<WasmToolRuntime>,
+    prepared: PreparedModule,
+    capabilities: Capabilities,
+) -> Self
+```
+
+Creates a new WASM tool wrapper.
+
+<ParamField path="runtime" type="Arc<WasmToolRuntime>" required>
+  Shared runtime for execution
+</ParamField>
+
+<ParamField path="prepared" type="PreparedModule" required>
+  Pre-compiled module from runtime.prepare()
+</ParamField>
+
+<ParamField path="capabilities" type="Capabilities" required>
+  Security capabilities to grant the tool
+</ParamField>
+
+### Configuration Methods
+
+```rust src/tools/wasm/wrapper.rs
+pub fn with_description(mut self, description: impl Into<String>) -> Self
+pub fn with_schema(mut self, schema: serde_json::Value) -> Self
+pub fn with_secrets_store(mut self, store: Arc<dyn SecretsStore + Send + Sync>) -> Self
+pub fn with_oauth_refresh(mut self, config: OAuthRefreshConfig) -> Self
+```
+
+Optional configuration overrides.
+
+## Capabilities
+
+Defines what host functions a WASM tool can access.
+
+```rust src/tools/wasm/capabilities.rs
+pub struct Capabilities {
+    pub http: Option<HttpCapability>,
+    pub workspace: Option<WorkspaceCapability>,
+    pub tool_invoke: Option<ToolInvokeCapability>,
+    pub secrets: Option<SecretsCapability>,
+}
+```
+
+### Constructor
+
+```rust src/tools/wasm/capabilities.rs
+pub fn none() -> Self
+```
+
+Creates a capabilities set with all features disabled (log and time are always available).
+
+### Configuration Methods
+
+```rust src/tools/wasm/capabilities.rs
+pub fn with_http(mut self, http: HttpCapability) -> Self
+pub fn with_workspace(mut self, workspace: WorkspaceCapability) -> Self
+pub fn with_tool_invoke(mut self, tool_invoke: ToolInvokeCapability) -> Self
+pub fn with_secrets(mut self, secrets: SecretsCapability) -> Self
+```
+
+## HttpCapability
+
+Allows HTTP requests to specific endpoints.
+
+```rust src/tools/wasm/capabilities.rs
+pub struct HttpCapability {
+    pub allowed_endpoints: Vec<EndpointPattern>,
+    pub rate_limit: Option<RateLimitConfig>,
+    pub credentials: HashMap<String, crate::secrets::CredentialMapping>,
+}
+```
+
+### Constructor
+
+```rust src/tools/wasm/capabilities.rs
+pub fn new(allowed_endpoints: Vec<EndpointPattern>) -> Self
+```
+
+<ParamField path="allowed_endpoints" type="Vec<EndpointPattern>" required>
+  List of allowed URL patterns
+</ParamField>
+
+## EndpointPattern
+
+Defines an allowed HTTP endpoint pattern.
+
+```rust src/tools/wasm/capabilities.rs
+pub struct EndpointPattern {
+    pub host: String,
+    pub port: Option<u16>,
+    pub path_prefix: Option<String>,
+    pub allowed_methods: Vec<String>,
+}
+```
+
+### Constructors
+
+```rust src/tools/wasm/capabilities.rs
+pub fn host(host: impl Into<String>) -> Self
+pub fn localhost(port: u16) -> Self
+
+pub fn with_port(mut self, port: u16) -> Self
+pub fn with_path_prefix(mut self, prefix: impl Into<String>) -> Self
+pub fn with_methods(mut self, methods: Vec<String>) -> Self
+```
+
+**Example:**
+```rust
+let pattern = EndpointPattern::host("api.openai.com")
+    .with_path_prefix("/v1/")
+    .with_methods(vec!["GET".into(), "POST".into()]);
+```
+
+## WorkspaceCapability
+
+Allows access to workspace files.
+
+```rust src/tools/wasm/capabilities.rs
+pub struct WorkspaceCapability {
+    pub reader: WorkspaceReader,
+    pub allowed_paths: Option<Vec<String>>,
+}
+```
+
+### Constructor
+
+```rust src/tools/wasm/capabilities.rs
+pub fn new(reader: WorkspaceReader) -> Self
+```
+
+<ParamField path="reader" type="WorkspaceReader" required>
+  Workspace reader for file access
+</ParamField>
+
+### Configuration
+
+```rust src/tools/wasm/capabilities.rs
+pub fn with_allowed_paths(mut self, paths: Vec<String>) -> Self
+```
+
+Restricts access to specific paths only.
+
+## ResourceLimits
+
+Defines execution resource limits.
+
+```rust src/tools/wasm/limits.rs
+pub struct ResourceLimits {
+    pub max_memory_bytes: usize,
+    pub fuel_config: FuelConfig,
+    pub max_execution_time: Duration,
+}
+```
+
+<ResponseField name="max_memory_bytes" type="usize" default="10MB">
+  Maximum memory the WASM instance can allocate
+</ResponseField>
+
+<ResponseField name="fuel_config" type="FuelConfig">
+  Fuel-based CPU metering configuration
+</ResponseField>
+
+<ResponseField name="max_execution_time" type="Duration" default="30s">
+  Maximum execution time before timeout
+</ResponseField>
+
+### Defaults
+
+```rust src/tools/wasm/limits.rs
+pub const DEFAULT_MEMORY_LIMIT: usize = 10 * 1024 * 1024; // 10 MB
+pub const DEFAULT_FUEL_LIMIT: u64 = 200_000_000; // ~100ms on modern CPU
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+```
+
+## Storage
+
+Persist WASM tools to the database.
+
+### WasmToolStore Trait
+
+```rust src/tools/wasm/storage.rs
+#[async_trait]
+pub trait WasmToolStore: Send + Sync {
+    async fn store(&self, params: StoreToolParams) -> Result<StoredWasmTool, WasmStorageError>;
+    async fn get(&self, user_id: &str, name: &str) -> Result<StoredWasmTool, WasmStorageError>;
+    async fn get_with_binary(&self, user_id: &str, name: &str) -> Result<StoredWasmToolWithBinary, WasmStorageError>;
+    async fn list(&self, user_id: &str) -> Result<Vec<StoredWasmTool>, WasmStorageError>;
+    async fn delete(&self, user_id: &str, name: &str) -> Result<(), WasmStorageError>;
+    async fn store_capabilities(&self, tool_id: Uuid, caps: StoredCapabilities) -> Result<(), WasmStorageError>;
+    async fn get_capabilities(&self, tool_id: Uuid) -> Result<Option<StoredCapabilities>, WasmStorageError>;
+}
+```
+
+### StoreToolParams
+
+```rust src/tools/wasm/storage.rs
+pub struct StoreToolParams {
+    pub user_id: String,
+    pub name: String,
+    pub description: String,
+    pub wasm_binary: Vec<u8>,
+    pub parameters_schema: serde_json::Value,
+    pub trust_level: TrustLevel,
+    pub source: String,
+}
+```
+
+## Error Types
+
+### WasmError
+
+```rust src/tools/wasm/error.rs
+pub enum WasmError {
+    CompilationFailed(String),
+    InstantiationFailed(String),
+    ExecutionFailed(String),
+    Trapped(TrapInfo),
+    Timeout,
+    FuelExhausted,
+    InvalidComponent(String),
+    InvalidParameters(String),
+    CapabilityDenied(String),
+}
+```
+
+### TrapInfo
+
+```rust src/tools/wasm/error.rs
+pub struct TrapInfo {
+    pub code: TrapCode,
+    pub message: String,
+    pub backtrace: Option<String>,
+}
+```
+
+## Example: Register WASM Tool
+
+```rust
+use ironclaw::tools::wasm::{
+    WasmToolRuntime, WasmRuntimeConfig, WasmToolWrapper,
+    Capabilities, HttpCapability, EndpointPattern,
+};
+use std::sync::Arc;
+
+// Create runtime
+let runtime = Arc::new(WasmToolRuntime::new(WasmRuntimeConfig::default())?);
+
+// Load WASM bytes
+let wasm_bytes = std::fs::read("my_tool.wasm")?;
+
+// Prepare the module
+let prepared = runtime.prepare("my_tool", &wasm_bytes, None).await?;
+
+// Configure capabilities
+let capabilities = Capabilities::none()
+    .with_http(HttpCapability::new(vec![
+        EndpointPattern::host("api.example.com")
+            .with_path_prefix("/v1/")
+            .with_methods(vec!["GET".into(), "POST".into()]),
+    ]));
+
+// Create wrapper
+let tool = WasmToolWrapper::new(runtime, prepared, capabilities)
+    .with_description("My custom WASM tool");
+
+// Register with tool registry
+registry.register(Arc::new(tool)).await;
+```
+
+## Example: Store and Load
+
+```rust
+use ironclaw::tools::wasm::{
+    PostgresWasmToolStore, StoreToolParams, TrustLevel,
+};
+
+// Create store
+let store = PostgresWasmToolStore::new(pool);
+
+// Store tool
+let tool = store.store(StoreToolParams {
+    user_id: "user_123".into(),
+    name: "my_tool".into(),
+    description: "Does something useful".into(),
+    wasm_binary: wasm_bytes,
+    parameters_schema: schema,
+    trust_level: TrustLevel::Trusted,
+    source: "local".into(),
+}).await?;
+
+// Load and register
+registry.register_wasm_from_storage(
+    &store,
+    &runtime,
+    "user_123",
+    "my_tool",
+).await?;
+```

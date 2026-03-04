@@ -1,0 +1,328 @@
+---
+title: 'ironclaw status'
+description: 'Show system health and diagnostics'
+icon: 'heart'
+---
+
+## Overview
+
+The `ironclaw status` command displays system health information, including database connectivity, authentication status, installed tools, and configuration details.
+
+## Usage
+
+```bash
+ironclaw status
+```
+
+No options or arguments required.
+
+## Output
+
+```bash
+IronClaw Status
+===============
+
+  Version:     ironclaw v0.1.0
+  Database:    connected (PostgreSQL)
+  Session:     found (/home/user/.ironclaw/session.json)
+  Secrets:     configured (env)
+  Embeddings:  enabled (provider: openai, model: text-embedding-3-small)
+  WASM Tools:  3 installed (/home/user/.ironclaw/tools)
+  Channels:    cli, http:3000
+  Heartbeat:   enabled (interval: 300s)
+  MCP Servers: 2 enabled / 3 configured
+
+  Config:      /home/user/.ironclaw/.env
+```
+
+## Status Fields
+
+### Version
+
+Displays the IronClaw version number:
+
+```
+  Version:     ironclaw v0.1.0
+```
+
+### Database
+
+Shows database backend and connection status:
+
+```
+  Database:    connected (PostgreSQL)
+```
+
+Possible values:
+- `connected (PostgreSQL)` - PostgreSQL connected successfully
+- `libSQL (/path/to/db)` - Local libSQL database
+- `libSQL (/path/to/db + Turso sync)` - libSQL with Turso synchronization
+- `error (connection refused)` - Connection failed
+- `not configured` - `DATABASE_URL` not set
+
+<Note>
+  If you see an error, run `ironclaw doctor` for detailed diagnostics.
+</Note>
+
+### Session
+
+Indicates NEAR AI authentication status:
+
+```
+  Session:     found (/home/user/.ironclaw/session.json)
+```
+
+Possible values:
+- `found (/path/to/session.json)` - Authenticated, session file exists
+- `not found (run 'ironclaw onboard')` - Not authenticated
+
+If using API key mode:
+```
+  Session:     API key configured
+```
+
+### Secrets
+
+Shows secrets encryption key configuration:
+
+```
+  Secrets:     configured (env)
+```
+
+Possible values:
+- `configured (env)` - Master key found in `SECRETS_MASTER_KEY` environment variable
+- `env not set (keychain may be configured)` - Not in env, may be in system keychain
+
+<Info>
+  The status command doesn't probe the keychain to avoid triggering password dialogs.
+</Info>
+
+### Embeddings
+
+Embeddings configuration for semantic search:
+
+```
+  Embeddings:  enabled (provider: openai, model: text-embedding-3-small)
+```
+
+Possible values:
+- `enabled (provider: X, model: Y)` - Embeddings enabled with provider and model
+- `disabled` - Semantic search not enabled
+
+### WASM Tools
+
+Number of installed WASM tools:
+
+```
+  WASM Tools:  3 installed (/home/user/.ironclaw/tools)
+```
+
+Possible values:
+- `N installed (/path/to/tools)` - N tools found
+- `directory not found (/path/to/tools)` - Tools directory doesn't exist
+
+### Channels
+
+Enabled communication channels:
+
+```
+  Channels:    cli, http:3000
+```
+
+Possible channels:
+- `cli` - Command-line interface (always enabled)
+- `http:3000` - HTTP API on port 3000
+- `N wasm` - N WASM channel plugins installed
+
+### Heartbeat
+
+Heartbeat loop status:
+
+```
+  Heartbeat:   enabled (interval: 300s)
+```
+
+Possible values:
+- `enabled (interval: Ns)` - Heartbeat enabled, runs every N seconds
+- `disabled` - Heartbeat loop disabled
+
+<Info>
+  The heartbeat loop runs periodic maintenance tasks like updating `HEARTBEAT.md` and checking for scheduled jobs.
+</Info>
+
+### MCP Servers
+
+Configured MCP servers:
+
+```
+  MCP Servers: 2 enabled / 3 configured
+```
+
+Format: `N enabled / M configured`
+
+If no servers are configured:
+```
+  MCP Servers: none configured
+```
+
+### Config
+
+Path to the configuration file:
+
+```
+  Config:      /home/user/.ironclaw/.env
+```
+
+## Examples
+
+### Quick health check
+
+```bash
+ironclaw status
+```
+
+Use this to quickly verify your installation is working.
+
+### Check after configuration changes
+
+After modifying settings, verify they're applied:
+
+```bash
+ironclaw config set heartbeat.enabled true
+ironclaw status
+```
+
+### Verify installation
+
+After installing tools or MCP servers:
+
+```bash
+ironclaw tool install ~/my-tool
+ironclaw status
+```
+
+You should see the tool count increase.
+
+### Troubleshooting
+
+If the agent isn't working:
+
+```bash
+ironclaw status
+ironclaw doctor
+```
+
+Compare the outputs to identify issues.
+
+## Status vs Doctor
+
+Two commands provide health information:
+
+### `ironclaw status`
+
+- Quick overview of current state
+- Passive checks (no network calls)
+- Fast execution
+- Use for routine monitoring
+
+### `ironclaw doctor`
+
+- Active diagnostics with network probes
+- Tests external dependencies
+- Validates configuration
+- Use for troubleshooting
+
+<Tip>
+  Run `status` regularly to monitor your system. Run `doctor` when something's wrong.
+</Tip>
+
+## Interpreting Results
+
+### Healthy System
+
+A healthy installation looks like:
+
+```bash
+  Version:     ironclaw v0.1.0
+  Database:    connected (PostgreSQL)
+  Session:     found (/home/user/.ironclaw/session.json)
+  Secrets:     configured (env)
+  Embeddings:  enabled (provider: openai, model: text-embedding-3-small)
+  WASM Tools:  5 installed (/home/user/.ironclaw/tools)
+  Channels:    cli, http:3000
+  Heartbeat:   enabled (interval: 300s)
+  MCP Servers: 3 enabled / 3 configured
+```
+
+### Common Issues
+
+**Database not connected:**
+```
+  Database:    error (connection refused)
+```
+→ Check `DATABASE_URL` or run `ironclaw doctor`
+
+**Session not found:**
+```
+  Session:     not found (run 'ironclaw onboard')
+```
+→ Run `ironclaw onboard` to authenticate
+
+**No tools installed:**
+```
+  WASM Tools:  0 installed (/home/user/.ironclaw/tools)
+```
+→ Install tools with `ironclaw tool install <path>`
+
+**MCP servers not enabled:**
+```
+  MCP Servers: 0 enabled / 3 configured
+```
+→ Enable servers with `ironclaw mcp toggle <name> --enable`
+
+## Automation
+
+You can parse the status output in scripts:
+
+```bash
+# Check if database is connected
+if ironclaw status | grep -q "Database.*connected"; then
+  echo "Database OK"
+else
+  echo "Database ERROR"
+  exit 1
+fi
+```
+
+Or use it in monitoring systems:
+
+```bash
+#!/bin/bash
+# Healthcheck script
+ironclaw status > /tmp/ironclaw-status.txt
+if [ $? -eq 0 ]; then
+  exit 0
+else
+  exit 1
+fi
+```
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw doctor" icon="stethoscope" href="/cli/doctor">
+    Run comprehensive diagnostics
+  </Card>
+  
+  <Card title="ironclaw config list" icon="gear" href="/cli/config">
+    View all configuration settings
+  </Card>
+  
+  <Card title="ironclaw service status" icon="gears" href="/cli/service">
+    Check service status
+  </Card>
+  
+  <Card title="ironclaw onboard" icon="rocket" href="/cli/onboard">
+    Fix configuration issues
+  </Card>
+</CardGroup>

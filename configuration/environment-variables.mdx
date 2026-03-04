@@ -1,0 +1,415 @@
+---
+title: "Environment Variables"
+description: "Complete reference for all IronClaw environment variables"
+---
+
+## Overview
+
+IronClaw configuration follows this priority: **env var > database settings > defaults**.
+
+Most settings can be configured via the [onboarding wizard](/configuration/onboarding) or by editing:
+- `~/.ironclaw/.env` (bootstrap variables)
+- Environment variables in your shell
+
+## Database Configuration
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `DATABASE_BACKEND` | Backend type (`postgres` or `libsql`) | `postgres` | No |
+| `DATABASE_URL` | PostgreSQL connection URL | - | Yes (for postgres) |
+| `DATABASE_POOL_SIZE` | Max connections in pool | `10` | No |
+| `DATABASE_SSLMODE` | SSL mode (`disable`, `prefer`, `require`) | `prefer` | No |
+| `LIBSQL_PATH` | Local libSQL database file | `~/.ironclaw/ironclaw.db` | Yes (for libsql) |
+| `LIBSQL_URL` | Turso remote URL (optional) | - | No |
+| `LIBSQL_AUTH_TOKEN` | Turso auth token | - | Yes (if LIBSQL_URL set) |
+
+**Example (PostgreSQL):**
+```bash
+DATABASE_BACKEND=postgres
+DATABASE_URL=postgres://user:password@localhost:5432/ironclaw
+DATABASE_POOL_SIZE=10
+DATABASE_SSLMODE=prefer
+```
+
+**Example (libSQL):**
+```bash
+DATABASE_BACKEND=libsql
+LIBSQL_PATH=~/.ironclaw/ironclaw.db
+# Optional Turso sync:
+# LIBSQL_URL=libsql://your-db.turso.io
+# LIBSQL_AUTH_TOKEN=your-token
+```
+
+## LLM Provider Configuration
+
+### General
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `LLM_BACKEND` | Provider (`nearai`, `openai`, `anthropic`, `ollama`, `openai_compatible`) | `nearai` | No |
+
+### NEAR AI
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `NEARAI_MODEL` | Model to use | `zai-org/GLM-latest` | No |
+| `NEARAI_BASE_URL` | API base URL | `https://private.near.ai` | No |
+| `NEARAI_AUTH_URL` | Auth/refresh endpoint base URL | `https://private.near.ai` | No |
+| `NEARAI_SESSION_TOKEN` | Session token (for hosting providers) | - | No |
+| `NEARAI_SESSION_PATH` | Path to session file | `~/.ironclaw/session.json` | No |
+| `NEARAI_API_KEY` | API key from cloud.near.ai | - | No |
+| `NEARAI_CHEAP_MODEL` | Cheap/fast model for lightweight tasks | - | No |
+| `NEARAI_FALLBACK_MODEL` | Fallback model for automatic failover | - | No |
+| `NEARAI_MAX_RETRIES` | Max retry attempts for transient errors | `3` | No |
+| `CIRCUIT_BREAKER_THRESHOLD` | Consecutive failures before circuit opens | - | No |
+| `CIRCUIT_BREAKER_RECOVERY_SECS` | Circuit breaker recovery timeout | `30` | No |
+| `RESPONSE_CACHE_ENABLED` | Enable in-memory response caching | `false` | No |
+| `RESPONSE_CACHE_TTL_SECS` | Cache TTL in seconds | `3600` | No |
+| `RESPONSE_CACHE_MAX_ENTRIES` | Max cached responses | `1000` | No |
+| `LLM_FAILOVER_COOLDOWN_SECS` | Failover cooldown duration | `300` | No |
+| `LLM_FAILOVER_THRESHOLD` | Consecutive failures before cooldown | `3` | No |
+| `SMART_ROUTING_CASCADE` | Enable cascade for smart routing | `true` | No |
+
+**Example:**
+```bash
+LLM_BACKEND=nearai
+NEARAI_MODEL=anthropic::claude-sonnet-4-20250514
+NEARAI_CHEAP_MODEL=zai-org/GLM-latest
+NEARAI_FALLBACK_MODEL=openai::gpt-4o-mini
+NEARAI_MAX_RETRIES=3
+```
+
+### Anthropic
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `ANTHROPIC_API_KEY` | Anthropic API key | - | Yes |
+| `ANTHROPIC_MODEL` | Model to use | `claude-sonnet-4-20250514` | No |
+| `ANTHROPIC_BASE_URL` | Custom base URL (proxy) | - | No |
+
+**Example:**
+```bash
+LLM_BACKEND=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
+```
+
+### OpenAI
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `OPENAI_API_KEY` | OpenAI API key | - | Yes |
+| `OPENAI_MODEL` | Model to use | `gpt-4o` | No |
+| `OPENAI_BASE_URL` | Custom base URL (proxy) | - | No |
+
+**Example:**
+```bash
+LLM_BACKEND=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+```
+
+### Ollama
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `OLLAMA_BASE_URL` | Ollama server URL | `http://localhost:11434` | No |
+| `OLLAMA_MODEL` | Model to use | `llama3` | No |
+
+**Example:**
+```bash
+LLM_BACKEND=ollama
+OLLAMA_MODEL=llama3.2
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+### OpenAI-Compatible
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `LLM_BASE_URL` | API base URL | - | Yes |
+| `LLM_API_KEY` | API key (if required) | - | No |
+| `LLM_MODEL` | Model to use | `default` | No |
+| `LLM_EXTRA_HEADERS` | Comma-separated `Key:Value` HTTP headers | - | No |
+
+**Example (OpenRouter):**
+```bash
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-...
+LLM_MODEL=anthropic/claude-sonnet-4
+LLM_EXTRA_HEADERS=HTTP-Referer:https://myapp.com,X-Title:MyApp
+```
+
+**Example (LM Studio):**
+```bash
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=http://localhost:1234/v1
+LLM_MODEL=llama-3.2-3b-instruct-q4_K_M
+# No API key needed
+```
+
+## Embeddings Configuration
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `EMBEDDINGS_PROVIDER` | Provider (`nearai` or `openai`) | - | No |
+| `EMBEDDINGS_MODEL` | Model to use | `text-embedding-3-small` | No |
+| `EMBEDDINGS_ENABLED` | Enable semantic search | - | No |
+
+**Example:**
+```bash
+EMBEDDINGS_PROVIDER=openai
+EMBEDDINGS_MODEL=text-embedding-3-small
+EMBEDDINGS_ENABLED=true
+```
+
+## Channel Configuration
+
+### HTTP Webhook
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `HTTP_HOST` | Bind address | `0.0.0.0` | No |
+| `HTTP_PORT` | Port | `8080` | No |
+| `HTTP_WEBHOOK_SECRET` | HMAC secret for webhook verification | - | No |
+
+**Example:**
+```bash
+HTTP_HOST=127.0.0.1
+HTTP_PORT=8080
+HTTP_WEBHOOK_SECRET=your-webhook-secret
+```
+
+### Slack Bot
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `SLACK_BOT_TOKEN` | Bot User OAuth Token (`xoxb-...`) | - | Yes |
+| `SLACK_APP_TOKEN` | App-Level Token (`xapp-...`) | - | Yes |
+| `SLACK_SIGNING_SECRET` | Signing secret for webhook verification | - | Yes |
+
+**Example:**
+```bash
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_TOKEN=xapp-...
+SLACK_SIGNING_SECRET=...
+```
+
+### Telegram Bot
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `TELEGRAM_BOT_TOKEN` | Bot token from [@BotFather](https://t.me/botfather) | - | Yes |
+
+**Example:**
+```bash
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+```
+
+### Signal Channel
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `SIGNAL_HTTP_URL` | signal-cli HTTP daemon URL | `http://127.0.0.1:8080` | No |
+| `SIGNAL_ACCOUNT` | Signal phone number | - | Yes |
+| `SIGNAL_ALLOW_FROM` | Comma-separated allowed senders (`*` for all) | - | No |
+| `SIGNAL_ALLOW_FROM_GROUPS` | Comma-separated allowed group IDs | - | No |
+| `SIGNAL_DM_POLICY` | DM policy (`open`, `allowlist`, `pairing`) | `pairing` | No |
+| `SIGNAL_GROUP_POLICY` | Group policy (`allowlist`, `open`, `disabled`) | `allowlist` | No |
+| `SIGNAL_GROUP_ALLOW_FROM` | Comma-separated allowed senders in groups | - | No |
+| `SIGNAL_IGNORE_ATTACHMENTS` | Ignore attachments | `false` | No |
+| `SIGNAL_IGNORE_STORIES` | Ignore stories | `true` | No |
+
+**Example:**
+```bash
+SIGNAL_HTTP_URL=http://127.0.0.1:8080
+SIGNAL_ACCOUNT=+1234567890
+SIGNAL_ALLOW_FROM=+1234567890,uuid:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+SIGNAL_DM_POLICY=pairing
+```
+
+## Agent Settings
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `AGENT_NAME` | Agent name | `ironclaw` | No |
+| `AGENT_MAX_PARALLEL_JOBS` | Max concurrent jobs | `5` | No |
+| `AGENT_JOB_TIMEOUT_SECS` | Job timeout in seconds | `3600` | No |
+| `AGENT_STUCK_THRESHOLD_SECS` | Threshold for stuck job detection | `300` | No |
+| `AGENT_USE_PLANNING` | Enable planning phase before execution | `true` | No |
+
+**Example:**
+```bash
+AGENT_NAME=ironclaw
+AGENT_MAX_PARALLEL_JOBS=10
+AGENT_JOB_TIMEOUT_SECS=7200
+AGENT_USE_PLANNING=true
+```
+
+## Self-Repair Settings
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `SELF_REPAIR_CHECK_INTERVAL_SECS` | Check interval in seconds | `60` | No |
+| `SELF_REPAIR_MAX_ATTEMPTS` | Max repair attempts | `3` | No |
+
+**Example:**
+```bash
+SELF_REPAIR_CHECK_INTERVAL_SECS=120
+SELF_REPAIR_MAX_ATTEMPTS=5
+```
+
+## Heartbeat Settings
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `HEARTBEAT_ENABLED` | Enable periodic background execution | `false` | No |
+| `HEARTBEAT_INTERVAL_SECS` | Interval in seconds | `1800` | No |
+| `HEARTBEAT_NOTIFY_CHANNEL` | Channel for notifications | `cli` | No |
+| `HEARTBEAT_NOTIFY_USER` | User ID for notifications | `default` | No |
+
+**Example:**
+```bash
+HEARTBEAT_ENABLED=true
+HEARTBEAT_INTERVAL_SECS=3600
+HEARTBEAT_NOTIFY_CHANNEL=telegram
+HEARTBEAT_NOTIFY_USER=default
+```
+
+## Memory Hygiene Settings
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `MEMORY_HYGIENE_ENABLED` | Enable automatic cleanup | `true` | No |
+| `MEMORY_HYGIENE_RETENTION_DAYS` | Delete docs older than N days | `30` | No |
+| `MEMORY_HYGIENE_CADENCE_HOURS` | Min hours between cleanups | `12` | No |
+
+**Example:**
+```bash
+MEMORY_HYGIENE_ENABLED=true
+MEMORY_HYGIENE_RETENTION_DAYS=60
+MEMORY_HYGIENE_CADENCE_HOURS=24
+```
+
+<Note>
+  Identity files (`IDENTITY.md`, `SOUL.md`) are never deleted.
+</Note>
+
+## Safety Settings
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `SAFETY_MAX_OUTPUT_LENGTH` | Max tool output length (bytes) | `100000` | No |
+| `SAFETY_INJECTION_CHECK_ENABLED` | Enable prompt injection detection | `true` | No |
+
+**Example:**
+```bash
+SAFETY_MAX_OUTPUT_LENGTH=200000
+SAFETY_INJECTION_CHECK_ENABLED=true
+```
+
+## Secrets Configuration
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `SECRETS_MASTER_KEY` | 256-bit hex-encoded encryption key | - | No |
+
+**Example:**
+```bash
+SECRETS_MASTER_KEY=abc123...  # Generated by wizard
+```
+
+<Warning>
+  Store the master key securely. If lost, encrypted secrets cannot be recovered.
+</Warning>
+
+## Logging
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `RUST_LOG` | Logging level and filters | `ironclaw=info` | No |
+
+**Example:**
+```bash
+# Debug mode
+RUST_LOG=ironclaw=debug,tower_http=debug
+
+# Trace all modules
+RUST_LOG=trace
+
+# Info with specific debug targets
+RUST_LOG=ironclaw=info,ironclaw::llm=debug
+```
+
+## Onboarding
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `ONBOARD_COMPLETED` | Onboarding completion flag | - | No |
+| `IRONCLAW_OAUTH_CALLBACK_URL` | OAuth callback URL (for remote servers) | `http://127.0.0.1:9876` | No |
+
+**Example (remote server):**
+```bash
+IRONCLAW_OAUTH_CALLBACK_URL=https://myserver.example.com:9876
+```
+
+## Complete Example
+
+Here's a complete `~/.ironclaw/.env` file for a typical setup:
+
+```bash
+# Database
+DATABASE_BACKEND=postgres
+DATABASE_URL=postgres://user:password@localhost:5432/ironclaw
+DATABASE_POOL_SIZE=10
+
+# LLM Provider
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-...
+LLM_MODEL=anthropic/claude-sonnet-4
+LLM_EXTRA_HEADERS=HTTP-Referer:https://myapp.com,X-Title:MyApp
+
+# Embeddings
+EMBEDDINGS_PROVIDER=openai
+EMBEDDINGS_MODEL=text-embedding-3-small
+EMBEDDINGS_ENABLED=true
+
+# Channels
+HTTP_HOST=0.0.0.0
+HTTP_PORT=8080
+HTTP_WEBHOOK_SECRET=your-webhook-secret
+
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+
+# Agent
+AGENT_NAME=ironclaw
+AGENT_MAX_PARALLEL_JOBS=5
+AGENT_USE_PLANNING=true
+
+# Heartbeat
+HEARTBEAT_ENABLED=true
+HEARTBEAT_INTERVAL_SECS=1800
+HEARTBEAT_NOTIFY_CHANNEL=telegram
+
+# Safety
+SAFETY_INJECTION_CHECK_ENABLED=true
+
+# Logging
+RUST_LOG=ironclaw=debug
+
+# Onboarding
+ONBOARD_COMPLETED=true
+```
+
+## Loading Priority
+
+IronClaw loads configuration in this order:
+
+1. **Current directory `.env`** (highest priority, via dotenvy)
+2. **`~/.ironclaw/.env`** (bootstrap variables)
+3. **Database settings** (from `settings` table)
+4. **Hardcoded defaults** (lowest priority)
+
+Environment variables always override database settings.

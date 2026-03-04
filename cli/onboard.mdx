@@ -1,0 +1,233 @@
+---
+title: 'ironclaw onboard'
+description: 'Interactive setup wizard for first-time configuration'
+icon: 'rocket'
+---
+
+## Overview
+
+The `ironclaw onboard` command launches an interactive wizard that guides you through initial configuration of IronClaw. This includes authentication, database setup, and channel configuration.
+
+<Info>
+  Run this command when setting up IronClaw for the first time, or to reconfigure your installation.
+</Info>
+
+## Usage
+
+```bash
+ironclaw onboard [OPTIONS]
+```
+
+## Options
+
+<ParamField path="--skip-auth" type="flag">
+  Skip the authentication step and use your existing NEAR AI session.
+  
+  Use this if you've already authenticated and don't want to log in again.
+</ParamField>
+
+<ParamField path="--channels-only" type="flag">
+  Reconfigure channels only, skipping authentication and other setup steps.
+  
+  Useful when you want to enable/disable specific channels without redoing the full setup.
+</ParamField>
+
+## Examples
+
+### Complete onboarding
+
+Run the full setup wizard:
+
+```bash
+ironclaw onboard
+```
+
+### Skip authentication
+
+Use your existing session and configure the rest:
+
+```bash
+ironclaw onboard --skip-auth
+```
+
+### Reconfigure channels only
+
+Change which channels are enabled without touching authentication:
+
+```bash
+ironclaw onboard --channels-only
+```
+
+## Onboarding Steps
+
+The onboarding wizard walks you through the following steps:
+
+### 1. NEAR AI Authentication
+
+Authenticate with NEAR AI to enable LLM access:
+
+```bash
+Welcome to IronClaw!
+
+Step 1: Authenticate with NEAR AI
+================================
+
+Opening browser for authentication...
+Waiting for login...
+
+✓ Authentication successful!
+```
+
+You can skip this step with `--skip-auth` if you've already authenticated.
+
+### 2. Database Configuration
+
+Choose and configure your database backend:
+
+```bash
+Step 2: Database Setup
+=====================
+
+Select database backend:
+  1. PostgreSQL (recommended for production)
+  2. libSQL (local, embedded database)
+  3. Turso (hosted libSQL with sync)
+
+Choice [1-3]: 2
+
+✓ Database configured!
+```
+
+### 3. Secrets Master Key
+
+Generate or provide a master encryption key for storing secrets:
+
+```bash
+Step 3: Secrets Encryption
+=========================
+
+A master key is required to encrypt tool credentials and API keys.
+
+Options:
+  1. Generate a new key (recommended)
+  2. Provide an existing key
+
+Choice [1-2]: 1
+
+✓ Master key generated and saved to keychain!
+```
+
+### 4. Channel Configuration
+
+Choose which communication channels to enable:
+
+```bash
+Step 4: Enable Channels
+======================
+
+Which channels do you want to enable?
+
+  [x] CLI (command-line interface)
+  [ ] HTTP (local API server)
+  [ ] Telegram
+  [ ] Discord
+  [ ] Slack
+
+Use arrow keys to navigate, Space to toggle, Enter to confirm.
+
+✓ Channels configured!
+```
+
+This step can be rerun independently with `--channels-only`.
+
+### 5. Complete
+
+```bash
+Setup Complete!
+==============
+
+Your IronClaw installation is ready.
+
+Next steps:
+  • Run 'ironclaw' to start the agent
+  • Run 'ironclaw tool install <path>' to add tools
+  • Run 'ironclaw mcp add <name> <url>' to add MCP servers
+
+For help, run 'ironclaw --help' or visit https://github.com/ironclaw-ai/ironclaw
+```
+
+## Configuration Files Created
+
+Onboarding creates or updates the following files:
+
+- `~/.ironclaw/.env` - Environment variables and configuration
+- `~/.ironclaw/session.json` - NEAR AI authentication session
+- `~/.ironclaw/ironclaw.db` - Local database (if using libSQL)
+
+<Note>
+  The `.env` file contains sensitive credentials. Keep it secure and never commit it to version control.
+</Note>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Browser doesn't open for authentication">
+    If your browser doesn't open automatically:
+    
+    1. Copy the authentication URL shown in the terminal
+    2. Open it manually in your browser
+    3. Complete the login flow
+    4. Return to the terminal to continue
+  </Accordion>
+  
+  <Accordion title="Database connection fails">
+    If PostgreSQL connection fails:
+    
+    1. Verify your `DATABASE_URL` is correct
+    2. Check that PostgreSQL is running
+    3. Ensure the database exists
+    4. Verify network connectivity and firewall rules
+    
+    Alternatively, choose libSQL for a local embedded database that requires no setup.
+  </Accordion>
+  
+  <Accordion title="Master key not saved">
+    If the master key fails to save to the keychain:
+    
+    1. The key will be saved to `.env` instead
+    2. On macOS, you may need to grant keychain access
+    3. On Linux, ensure `libsecret` is installed
+    
+    You can also set `SECRETS_MASTER_KEY` manually in `.env`.
+  </Accordion>
+</AccordionGroup>
+
+## Reconfiguration
+
+You can rerun onboarding at any time to reconfigure your installation:
+
+```bash
+ironclaw onboard
+```
+
+Existing configuration will be preserved unless you explicitly change it during the wizard.
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw run" icon="play" href="/cli/run">
+    Start the agent after onboarding
+  </Card>
+  
+  <Card title="ironclaw config" icon="gear" href="/cli/config">
+    View and modify settings
+  </Card>
+  
+  <Card title="ironclaw status" icon="heart" href="/cli/status">
+    Verify your configuration
+  </Card>
+  
+  <Card title="ironclaw doctor" icon="stethoscope" href="/cli/doctor">
+    Diagnose configuration issues
+  </Card>
+</CardGroup>

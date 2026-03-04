@@ -1,0 +1,407 @@
+---
+title: 'MCP Tool API'
+description: 'Model Context Protocol integration for external tool servers'
+---
+
+## Overview
+
+The MCP (Model Context Protocol) integration allows IronClaw to connect to external tool servers that provide additional capabilities through a standardized protocol.
+
+Supports both:
+- **Local servers**: Unauthenticated servers running on localhost
+- **Hosted servers**: OAuth-authenticated remote servers
+
+## McpClient
+
+Client for connecting to MCP servers.
+
+### Constructor (Simple)
+
+```rust src/tools/mcp/client.rs
+pub fn new(base_url: impl Into<String>) -> Self
+```
+
+Creates a simple MCP client without authentication (for local servers).
+
+<ParamField path="base_url" type="String" required>
+  Base URL of the MCP server (e.g., "http://localhost:8080")
+</ParamField>
+
+**Example:**
+```rust
+let client = McpClient::new("http://localhost:8080");
+```
+
+### Constructor (Authenticated)
+
+```rust src/tools/mcp/client.rs
+pub fn new_authenticated(
+    config: McpServerConfig,
+    session_manager: Arc<McpSessionManager>,
+    secrets: Arc<dyn SecretsStore + Send + Sync>,
+    user_id: impl Into<String>,
+) -> Self
+```
+
+Creates an authenticated MCP client for hosted servers.
+
+<ParamField path="config" type="McpServerConfig" required>
+  Server configuration including OAuth settings
+</ParamField>
+
+<ParamField path="session_manager" type="Arc<McpSessionManager>" required>
+  Session manager for token storage
+</ParamField>
+
+<ParamField path="secrets" type="Arc<dyn SecretsStore>" required>
+  Secrets store for credential management
+</ParamField>
+
+<ParamField path="user_id" type="String" required>
+  User ID for scoped authentication
+</ParamField>
+
+### create_tools
+
+```rust src/tools/mcp/client.rs
+pub async fn create_tools(&self) -> Result<Vec<Arc<dyn Tool>>, McpError>
+```
+
+Lists available tools from the server and creates Tool implementations for each.
+
+**Returns:** `Result<Vec<Arc<dyn Tool>>, McpError>` - List of tools ready to register
+
+**Example:**
+```rust
+let tools = client.create_tools().await?;
+for tool in tools {
+    registry.register(tool).await;
+}
+```
+
+### initialize
+
+```rust src/tools/mcp/client.rs
+pub async fn initialize(&self) -> Result<InitializeResult, McpError>
+```
+
+Initializes the connection to the MCP server.
+
+**Returns:** Server capabilities and metadata
+
+### list_tools
+
+```rust src/tools/mcp/client.rs
+pub async fn list_tools(&self) -> Result<Vec<McpTool>, McpError>
+```
+
+Lists all tools available on the server.
+
+### call_tool
+
+```rust src/tools/mcp/client.rs
+pub async fn call_tool(
+    &self,
+    name: &str,
+    arguments: serde_json::Value,
+) -> Result<serde_json::Value, McpError>
+```
+
+Calls a tool on the server.
+
+<ParamField path="name" type="&str" required>
+  Tool name
+</ParamField>
+
+<ParamField path="arguments" type="serde_json::Value" required>
+  Tool arguments
+</ParamField>
+
+## McpServerConfig
+
+Configuration for an MCP server.
+
+```rust src/tools/mcp/config.rs
+pub struct McpServerConfig {
+    pub name: String,
+    pub url: String,
+    pub oauth: Option<OAuthConfig>,
+    pub trust_level: String,
+}
+```
+
+<ResponseField name="name" type="String" required>
+  Unique server name
+</ResponseField>
+
+<ResponseField name="url" type="String" required>
+  Server base URL
+</ResponseField>
+
+<ResponseField name="oauth" type="Option<OAuthConfig>">
+  Optional OAuth configuration for authentication
+</ResponseField>
+
+<ResponseField name="trust_level" type="String" default="untrusted">
+  Trust level: "trusted" or "untrusted"
+</ResponseField>
+
+## OAuthConfig
+
+OAuth authentication configuration.
+
+```rust src/tools/mcp/config.rs
+pub struct OAuthConfig {
+    pub client_id: String,
+    pub auth_url: String,
+    pub token_url: String,
+    pub scopes: Vec<String>,
+}
+```
+
+<ResponseField name="client_id" type="String" required>
+  OAuth client ID
+</ResponseField>
+
+<ResponseField name="auth_url" type="String" required>
+  Authorization endpoint URL
+</ResponseField>
+
+<ResponseField name="token_url" type="String" required>
+  Token exchange endpoint URL
+</ResponseField>
+
+<ResponseField name="scopes" type="Vec<String>" required>
+  OAuth scopes to request
+</ResponseField>
+
+## McpServersFile
+
+File format for MCP server configuration.
+
+```rust src/tools/mcp/config.rs
+pub struct McpServersFile {
+    pub servers: Vec<McpServerConfig>,
+}
+```
+
+### from_path
+
+```rust src/tools/mcp/config.rs
+pub fn from_path(path: impl AsRef<Path>) -> Result<Self, ConfigError>
+```
+
+Loads MCP server configurations from a JSON file.
+
+**Example mcp_servers.json:**
+```json
+{
+  "servers": [
+    {
+      "name": "local-tools",
+      "url": "http://localhost:8080",
+      "trust_level": "trusted"
+    },
+    {
+      "name": "example-hosted",
+      "url": "https://mcp.example.com",
+      "oauth": {
+        "client_id": "your_client_id",
+        "auth_url": "https://example.com/oauth/authorize",
+        "token_url": "https://example.com/oauth/token",
+        "scopes": ["tools:read", "tools:execute"]
+      },
+      "trust_level": "untrusted"
+    }
+  ]
+}
+```
+
+## McpTool
+
+Tool metadata from an MCP server.
+
+```rust src/tools/mcp/protocol.rs
+pub struct McpTool {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+}
+```
+
+<ResponseField name="name" type="String" required>
+  Tool name
+</ResponseField>
+
+<ResponseField name="description" type="String" required>
+  Human-readable description
+</ResponseField>
+
+<ResponseField name="input_schema" type="serde_json::Value" required>
+  JSON Schema for tool parameters
+</ResponseField>
+
+## McpSessionManager
+
+Manages OAuth sessions and token refresh.
+
+### Constructor
+
+```rust src/tools/mcp/session.rs
+pub fn new(store: Arc<dyn Database>) -> Self
+```
+
+Creates a new session manager.
+
+<ParamField path="store" type="Arc<dyn Database>" required>
+  Database for persistent token storage
+</ParamField>
+
+### get_access_token
+
+```rust src/tools/mcp/session.rs
+pub async fn get_access_token(
+    &self,
+    user_id: &str,
+    server_name: &str,
+) -> Result<Option<String>, SessionError>
+```
+
+Gets a valid access token for a server, refreshing if needed.
+
+### store_tokens
+
+```rust src/tools/mcp/session.rs
+pub async fn store_tokens(
+    &self,
+    user_id: &str,
+    server_name: &str,
+    access_token: String,
+    refresh_token: Option<String>,
+    expires_in: u64,
+) -> Result<(), SessionError>
+```
+
+Stores OAuth tokens after successful authentication.
+
+## Authentication Helpers
+
+### is_authenticated
+
+```rust src/tools/mcp/auth.rs
+pub async fn is_authenticated(
+    session_manager: &McpSessionManager,
+    user_id: &str,
+    server_name: &str,
+) -> bool
+```
+
+Checks if the user has valid authentication for a server.
+
+### refresh_access_token
+
+```rust src/tools/mcp/auth.rs
+pub async fn refresh_access_token(
+    session_manager: &McpSessionManager,
+    secrets: &Arc<dyn SecretsStore + Send + Sync>,
+    user_id: &str,
+    server_name: &str,
+    config: &McpServerConfig,
+) -> Result<String, AuthError>
+```
+
+Refreshes an expired access token.
+
+## Example: Local Server
+
+```rust
+use ironclaw::tools::mcp::McpClient;
+
+// Connect to local server
+let client = McpClient::new("http://localhost:8080");
+
+// Initialize and list tools
+let init_result = client.initialize().await?;
+println!("Server: {}", init_result.server_name);
+
+let tools = client.create_tools().await?;
+for tool in tools {
+    println!("Registering tool: {}", tool.name());
+    registry.register(tool).await;
+}
+```
+
+## Example: Hosted Server with OAuth
+
+```rust
+use ironclaw::tools::mcp::{
+    McpClient, McpServerConfig, McpSessionManager, OAuthConfig,
+};
+use std::sync::Arc;
+
+// Load configuration
+let config = McpServerConfig {
+    name: "example-api".into(),
+    url: "https://mcp.example.com".into(),
+    oauth: Some(OAuthConfig {
+        client_id: "your_client_id".into(),
+        auth_url: "https://example.com/oauth/authorize".into(),
+        token_url: "https://example.com/oauth/token".into(),
+        scopes: vec!["tools:read".into(), "tools:execute".into()],
+    }),
+    trust_level: "untrusted".into(),
+};
+
+// Create session manager
+let session_manager = Arc::new(McpSessionManager::new(db));
+
+// Create authenticated client
+let client = McpClient::new_authenticated(
+    config,
+    session_manager,
+    secrets_store,
+    "user_123",
+);
+
+// Check authentication
+if !is_authenticated(&session_manager, "user_123", "example-api").await {
+    // Guide user through OAuth flow
+    println!("Please authenticate: {}", config.oauth.unwrap().auth_url);
+    // After auth, tokens are stored automatically
+}
+
+// Use the client
+let tools = client.create_tools().await?;
+for tool in tools {
+    registry.register(tool).await;
+}
+```
+
+## Example: Load from Configuration File
+
+```rust
+use ironclaw::tools::mcp::{McpServersFile, McpClient};
+
+// Load servers from file
+let servers_file = McpServersFile::from_path("mcp_servers.json")?;
+
+// Connect to each server
+for config in servers_file.servers {
+    let client = if config.oauth.is_some() {
+        McpClient::new_authenticated(
+            config,
+            session_manager.clone(),
+            secrets.clone(),
+            &user_id,
+        )
+    } else {
+        McpClient::new(&config.url)
+    };
+    
+    // Register tools from this server
+    let tools = client.create_tools().await?;
+    for tool in tools {
+        registry.register(tool).await;
+    }
+}
+```

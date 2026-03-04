@@ -1,0 +1,413 @@
+---
+title: Installation
+description: Install IronClaw on Windows, macOS, or Linux using your preferred package manager or build from source
+---
+
+## Prerequisites
+
+Before installing IronClaw, ensure you have the following:
+
+- **PostgreSQL 15+** with [pgvector](https://github.com/pgvector/pgvector) extension
+- **NEAR AI account** (authentication handled via setup wizard)
+- **Rust 1.85+** (only if building from source)
+
+<Note>
+You can also use libSQL/Turso as an embedded database alternative. See the [database configuration guide](/configuration/database) for details.
+</Note>
+
+## Download or build
+
+Visit the [Releases page](https://github.com/nearai/ironclaw/releases/) to see the latest updates.
+
+<Tabs>
+  <Tab title="Windows">
+    <AccordionGroup>
+      <Accordion title="Windows Installer (recommended)" icon="windows">
+        Download and run the [Windows Installer](https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-x86_64-pc-windows-msvc.msi).
+
+        The installer will:
+        - Install IronClaw to `Program Files`
+        - Add IronClaw to your PATH
+        - Create a desktop shortcut
+      </Accordion>
+
+      <Accordion title="PowerShell script" icon="terminal">
+        Run this command in PowerShell:
+
+        ```powershell
+        irm https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.ps1 | iex
+        ```
+
+        The script will:
+        - Download the latest release
+        - Extract to `%LOCALAPPDATA%\ironclaw`
+        - Add IronClaw to your PATH
+      </Accordion>
+
+      <Accordion title="Cargo (build from source)" icon="rust">
+        Install with `cargo`, requires [Rust](https://rustup.rs) installed:
+
+        ```bash
+        # Clone the repository
+        git clone https://github.com/nearai/ironclaw.git
+        cd ironclaw
+
+        # Build
+        cargo build --release
+
+        # Run tests
+        cargo test
+        ```
+
+        <Warning>
+        For **full release** (after modifying channel sources), run `./scripts/build-all.sh` to rebuild channels first.
+        </Warning>
+      </Accordion>
+    </AccordionGroup>
+  </Tab>
+
+  <Tab title="macOS">
+    <AccordionGroup>
+      <Accordion title="Homebrew (recommended)" icon="beer-mug">
+        ```bash
+        brew install ironclaw
+        ```
+
+        Homebrew will:
+        - Install IronClaw and dependencies
+        - Add IronClaw to your PATH
+        - Keep it updated with `brew upgrade`
+      </Accordion>
+
+      <Accordion title="Shell script" icon="terminal">
+        ```bash
+        curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.sh | sh
+        ```
+
+        The script will:
+        - Download the latest release
+        - Extract to `~/.ironclaw/bin`
+        - Add IronClaw to your PATH
+      </Accordion>
+
+      <Accordion title="Cargo (build from source)" icon="rust">
+        Install with `cargo`, requires [Rust](https://rustup.rs) installed:
+
+        ```bash
+        # Clone the repository
+        git clone https://github.com/nearai/ironclaw.git
+        cd ironclaw
+
+        # Build
+        cargo build --release
+
+        # Run tests
+        cargo test
+        ```
+
+        <Warning>
+        For **full release** (after modifying channel sources), run `./scripts/build-all.sh` to rebuild channels first.
+        </Warning>
+      </Accordion>
+    </AccordionGroup>
+  </Tab>
+
+  <Tab title="Linux">
+    <AccordionGroup>
+      <Accordion title="Shell script (recommended)" icon="terminal">
+        ```bash
+        curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.sh | sh
+        ```
+
+        The script will:
+        - Download the latest release
+        - Extract to `~/.ironclaw/bin`
+        - Add IronClaw to your PATH
+      </Accordion>
+
+      <Accordion title="Cargo (build from source)" icon="rust">
+        Install with `cargo`, requires [Rust](https://rustup.rs) installed:
+
+        ```bash
+        # Clone the repository
+        git clone https://github.com/nearai/ironclaw.git
+        cd ironclaw
+
+        # Build
+        cargo build --release
+
+        # Run tests
+        cargo test
+        ```
+
+        <Warning>
+        For **full release** (after modifying channel sources), run `./scripts/build-all.sh` to rebuild channels first.
+        </Warning>
+      </Accordion>
+    </AccordionGroup>
+  </Tab>
+
+  <Tab title="WSL">
+    <Accordion title="Shell script (recommended)" icon="terminal">
+      ```bash
+      curl --proto '=https' --tlsv1.2 -LsSf https://github.com/nearai/ironclaw/releases/latest/download/ironclaw-installer.sh | sh
+      ```
+
+      The script will:
+      - Download the latest release
+      - Extract to `~/.ironclaw/bin`
+      - Add IronClaw to your PATH
+    </Accordion>
+  </Tab>
+</Tabs>
+
+## Verify installation
+
+After installation, verify that IronClaw is in your PATH:
+
+```bash
+ironclaw --version
+```
+
+You should see output like:
+
+```
+ironclaw 0.1.0
+```
+
+## Database setup
+
+IronClaw requires PostgreSQL with the pgvector extension for persistent storage and semantic search.
+
+<Steps>
+  <Step title="Install PostgreSQL">
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        brew install postgresql@15
+        brew services start postgresql@15
+        ```
+      </Tab>
+
+      <Tab title="Ubuntu/Debian">
+        ```bash
+        sudo apt update
+        sudo apt install postgresql postgresql-contrib
+        sudo systemctl start postgresql
+        ```
+      </Tab>
+
+      <Tab title="Windows">
+        Download and install from [postgresql.org](https://www.postgresql.org/download/windows/)
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Install pgvector extension">
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        brew install pgvector
+        ```
+      </Tab>
+
+      <Tab title="Ubuntu/Debian">
+        ```bash
+        sudo apt install postgresql-15-pgvector
+        ```
+      </Tab>
+
+      <Tab title="From source">
+        ```bash
+        git clone https://github.com/pgvector/pgvector.git
+        cd pgvector
+        make
+        sudo make install
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Create database">
+    ```bash
+    # Create database
+    createdb ironclaw
+
+    # Enable pgvector extension
+    psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    ```
+
+    <Note>
+    If you encounter permission errors, you may need to run these commands as the postgres user:
+    ```bash
+    sudo -u postgres createdb ironclaw
+    sudo -u postgres psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    ```
+    </Note>
+  </Step>
+
+  <Step title="Verify database connection">
+    ```bash
+    psql ironclaw -c "SELECT version();"
+    ```
+
+    You should see PostgreSQL version information.
+  </Step>
+</Steps>
+
+<Warning>
+If you see an error about pgvector not being installed:
+
+```
+ERROR:  extension "vector" is not available
+```
+
+Ensure the pgvector extension is properly installed and restart PostgreSQL:
+
+```bash
+# macOS
+brew services restart postgresql@15
+
+# Ubuntu/Debian
+sudo systemctl restart postgresql
+```
+
+Then re-run:
+
+```bash
+psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+</Warning>
+
+## Alternative: libSQL/Turso
+
+If you prefer an embedded database, you can use libSQL (SQLite-compatible) or Turso (cloud SQLite):
+
+<Tabs>
+  <Tab title="libSQL (local)">
+    No installation required. IronClaw will create a local database file at `~/.ironclaw/ironclaw.db` automatically.
+
+    Set the database backend during onboarding:
+
+    ```bash
+    ironclaw onboard
+    ```
+
+    Select **libSQL** when prompted for database backend.
+  </Tab>
+
+  <Tab title="Turso (cloud)">
+    1. Create a Turso account at [turso.tech](https://turso.tech)
+    2. Create a database:
+       ```bash
+       turso db create ironclaw
+       ```
+    3. Get your database URL and auth token:
+       ```bash
+       turso db show ironclaw --url
+       turso db tokens create ironclaw
+       ```
+    4. Set environment variables:
+       ```bash
+       export LIBSQL_URL=libsql://your-db.turso.io
+       export LIBSQL_AUTH_TOKEN=your-token
+       ```
+  </Tab>
+</Tabs>
+
+<Note>
+**Embedding dimension compatibility:** The libSQL schema uses `F32_BLOB(1536)` which requires exactly 1536 dimensions. If using non-OpenAI embedding models with different dimensions, use PostgreSQL instead.
+</Note>
+
+## Next steps
+
+Now that IronClaw is installed and your database is set up, proceed to the onboarding wizard:
+
+<Card title="Run onboarding" icon="rocket" href="/quickstart">
+  Configure IronClaw with the interactive setup wizard
+</Card>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Command not found: ironclaw">
+    The IronClaw binary is not in your PATH. Add it manually:
+
+    <Tabs>
+      <Tab title="macOS/Linux">
+        ```bash
+        export PATH="$HOME/.ironclaw/bin:$PATH"
+        ```
+
+        Add this to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) to make it permanent.
+      </Tab>
+
+      <Tab title="Windows">
+        Add `%LOCALAPPDATA%\ironclaw\bin` to your PATH environment variable:
+
+        1. Open System Properties → Advanced → Environment Variables
+        2. Edit the PATH variable
+        3. Add `%LOCALAPPDATA%\ironclaw\bin`
+        4. Restart your terminal
+      </Tab>
+    </Tabs>
+  </Accordion>
+
+  <Accordion title="PostgreSQL connection refused">
+    Ensure PostgreSQL is running:
+
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        brew services start postgresql@15
+        ```
+      </Tab>
+
+      <Tab title="Ubuntu/Debian">
+        ```bash
+        sudo systemctl start postgresql
+        ```
+      </Tab>
+
+      <Tab title="Windows">
+        Start the PostgreSQL service from Services (Win+R → `services.msc`)
+      </Tab>
+    </Tabs>
+  </Accordion>
+
+  <Accordion title="pgvector extension not found">
+    Install pgvector and restart PostgreSQL:
+
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        brew install pgvector
+        brew services restart postgresql@15
+        ```
+      </Tab>
+
+      <Tab title="Ubuntu/Debian">
+        ```bash
+        sudo apt install postgresql-15-pgvector
+        sudo systemctl restart postgresql
+        ```
+      </Tab>
+    </Tabs>
+
+    Then enable the extension:
+
+    ```bash
+    psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    ```
+  </Accordion>
+
+  <Accordion title="Cargo build fails">
+    Ensure you have the latest Rust toolchain:
+
+    ```bash
+    rustup update
+    ```
+
+    If you're building with custom features, ensure all dependencies are installed. Check the [building tools guide](/guides/building-tools) for details.
+  </Accordion>
+</AccordionGroup>

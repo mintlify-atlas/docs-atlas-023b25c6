@@ -1,0 +1,342 @@
+---
+title: 'WASM Sandbox'
+description: 'Isolated execution environment with capability-based security'
+---
+
+## Overview
+
+IronClaw executes untrusted tools in isolated WebAssembly (WASM) containers using Wasmtime. Each tool runs in a fresh instance with explicit opt-in permissions, preventing unauthorized access to system resources, network endpoints, and credentials.
+
+## Security Architecture
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              WASM Tool Execution                             │
+│                                                                              │
+│   WASM Tool ──▶ Host Function ──▶ Allowlist ──▶ Credential ──▶ Execute     │
+│   (untrusted)   (boundary)        Validator     Injector       Request      │
+│                                                                    │        │
+│                                                                    ▼        │
+│                              ◀────── Leak Detector ◀────── Response        │
+│                          (sanitized, no secrets)                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Capability-Based Permissions
+
+### Default Policy: Deny All
+
+By default, WASM tools have **NO** access to anything. Every capability must be explicitly granted:
+
+```rust
+// Default: zero permissions
+let capabilities = Capabilities::none();
+
+// Opt in to specific capabilities
+let capabilities = Capabilities::none()
+    .with_http(HttpCapability::new(vec![
+        EndpointPattern::host("api.openai.com").with_path_prefix("/v1/"),
+    ]))
+    .with_workspace_read(vec!["context/".to_string()])
+    .with_secrets(vec!["openai_key".to_string()]);
+```
+
+### Available Capabilities
+
+| Capability | Description | Security Control |
+|------------|-------------|------------------|
+| **Workspace Read** | Access files in workspace | Path prefix allowlist |
+| **HTTP** | Make network requests | Endpoint allowlist + HTTPS enforcement |
+| **Tool Invoke** | Call other tools | Alias-based indirection |
+| **Secrets** | Check if secrets exist | Name-based allowlist (no value access) |
+
+<Info>
+  WASM tools can check if a secret exists, but **never** read its value. Secrets are injected at the host boundary during HTTP requests.
+</Info>
+
+## HTTP Endpoint Allowlisting
+
+### Pattern Matching
+
+HTTP requests are validated against explicit patterns before execution:
+
+```rust
+// Exact host
+EndpointPattern::host("api.openai.com")
+
+// Wildcard subdomain
+EndpointPattern::host("*.example.com")
+
+// Path prefix constraint
+EndpointPattern::host("api.anthropic.com")
+    .with_path_prefix("/v1/messages")
+
+// Method restriction
+EndpointPattern::host("api.service.com")
+    .with_methods(vec!["GET".to_string(), "POST".to_string()])
+```
+
+### Validation Rules
+
+- **HTTPS required** by default (HTTP only with explicit opt-in)
+- **Userinfo rejected**: URLs with `user:pass@host` are blocked to prevent parser confusion attacks
+- **Path traversal prevention**: `..` segments are normalized, encoded separators (`%2F`) are rejected
+- **Host matching**: Case-insensitive with wildcard support
+
+<Warning>
+  Empty allowlists block all requests. Always specify at least one endpoint pattern.
+</Warning>
+
+## Credential Injection
+
+### Security Model
+
+Credentials flow through a controlled pipeline:
+
+```text
+WASM requests HTTP ──▶ Host checks allowlist ──▶ Decrypt secret ──▶ Inject
+                        & allowed_secrets        (in memory only)
+                                                        │
+                                                        ▼
+                              WASM ◀──── Leak Scan ◀──── Execute
+                                          (response)
+```
+
+**Key Properties:**
+
+1. **WASM never sees credentials**: Values are injected at the host boundary
+2. **Per-host mapping**: Credentials are injected only for matching hosts
+3. **Leak detection**: Responses are scanned for secret patterns before returning to WASM
+4. **Usage tracking**: Every injection is logged with timestamp and count
+
+### Injection Locations
+
+Secrets can be injected into different parts of the request:
+
+| Location | Example | Use Case |
+|----------|---------|----------|
+| **Authorization Bearer** | `Authorization: Bearer {token}` | OpenAI, Anthropic |
+| **Authorization Basic** | `Authorization: Basic {base64(user:pass)}` | HTTP Basic Auth |
+| **Custom Header** | `X-API-Key: {secret}` | Many APIs |
+| **Query Parameter** | `?api_key={secret}` | Legacy APIs |
+| **URL Path** | `/api/{account_id}/data` | Path templating |
+
+<Info>
+  Credential mappings are configured per-tool in `.capabilities.json` files. The global credential registry aggregates mappings from all installed tools.
+</Info>
+
+## Resource Limits
+
+### Fuel Metering
+
+CPU usage is limited via Wasmtime's fuel system:
+
+```rust
+const DEFAULT_FUEL_LIMIT: u64 = 100_000_000; // ~1 second on typical CPU
+```
+
+When fuel runs out, execution traps with `TrapCode::OutOfFuel`.
+
+### Memory Limits
+
+Memory growth is bounded by a `ResourceLimiter`:
+
+```rust
+const DEFAULT_MEMORY_LIMIT: usize = 10 * 1024 * 1024; // 10 MB
+```
+
+Exceeding the limit triggers `TrapCode::MemoryOutOfBounds`.
+
+### Execution Timeout
+
+Each tool execution has a wall-clock timeout:
+
+```rust
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+```
+
+Timeouts are enforced using Tokio's `timeout()` wrapper and Wasmtime's epoch interruption.
+
+### Rate Limiting
+
+Per-tool request limits prevent abuse:
+
+```rust
+RateLimitConfig {
+    requests_per_minute: 60,
+    requests_per_hour: 500,
+    burst: 10,
+}
+```
+
+<Warning>
+  Rate limit buckets are per-tool, not per-user. In multi-user deployments, consider adding user-level rate limiting.
+</Warning>
+
+## Isolation Guarantees
+
+### Fresh Instance Per Execution
+
+- **Compile once, instantiate fresh**: Tools are validated and compiled at registration time
+- **No instance reuse**: Each execution creates a new instance, preventing state pollution
+- **Side channel mitigation**: Fresh instances eliminate timing side channels from previous executions
+
+### Trap Recovery
+
+When a WASM tool traps (panic, OOM, etc.):
+
+1. Instance is immediately discarded
+2. Error details are logged
+3. No retry with the same instance
+4. User receives a sanitized error message
+
+### File System Isolation
+
+WASM tools have **no WASI filesystem access**. The only file operations allowed are:
+
+- `workspace_read`: Read-only access to allowlisted paths
+- Path validation: No `..`, no `/` prefix, no absolute paths
+
+## Threat Mitigation
+
+| Threat | Mitigation |
+|--------|------------|
+| **CPU exhaustion** | Fuel metering with per-execution limits |
+| **Memory exhaustion** | ResourceLimiter with 10MB default cap |
+| **Infinite loops** | Epoch interruption + Tokio timeout |
+| **Filesystem access** | No WASI FS, only host-controlled workspace reads |
+| **Network access** | Endpoint allowlist + HTTPS enforcement |
+| **Credential exposure** | Injection at host boundary only |
+| **Secret exfiltration** | Leak detector scans all outputs |
+| **Log spam** | Max 1000 entries, 4KB per message |
+| **Path traversal** | Path normalization and validation |
+| **Trap recovery** | Discard instance, never reuse |
+| **Side channels** | Fresh instance per execution |
+| **Rate abuse** | Per-tool request limits |
+| **Binary tampering** | BLAKE3 hash verification on load |
+| **Direct tool access** | Tool aliasing (indirection layer) |
+
+## Binary Integrity
+
+### Hash Verification
+
+WASM binaries are hashed with BLAKE3 during registration:
+
+```rust
+let hash = compute_binary_hash(&wasm_bytes); // BLAKE3 of bytes
+let stored_tool = store.get_tool_with_binary(name).await?;
+verify_binary_integrity(&stored_tool, &wasm_bytes)?;
+```
+
+If the stored hash doesn't match the loaded bytes, execution is blocked.
+
+### Trust Levels
+
+Tools are classified by origin:
+
+```rust
+pub enum TrustLevel {
+    Builtin,        // Shipped with IronClaw
+    Verified,       // From trusted registry
+    User,           // User-created tools
+    Development,    // Local dev builds
+}
+```
+
+Higher trust levels may receive relaxed limits or additional capabilities.
+
+## Configuration
+
+### Runtime Configuration
+
+```rust
+WasmRuntimeConfig {
+    fuel_config: FuelConfig {
+        enabled: true,
+        per_call_limit: 100_000_000,
+        boost_factor: 2.0,  // For trusted tools
+    },
+    memory_limit: 10 * 1024 * 1024,
+    timeout: Duration::from_secs(30),
+    max_log_entries: 1000,
+    max_log_message_size: 4096,
+}
+```
+
+### Per-Tool Capabilities
+
+Capabilities are defined in `{tool_name}.capabilities.json`:
+
+```json
+{
+  "http": {
+    "allowlist": [
+      {
+        "host": "api.openai.com",
+        "path_prefix": "/v1/",
+        "methods": ["POST"]
+      }
+    ],
+    "credentials": [
+      {
+        "secret_name": "openai_key",
+        "location": "authorization_bearer",
+        "host_patterns": ["api.openai.com"]
+      }
+    ]
+  },
+  "workspace_read": {
+    "allowed_prefixes": ["context/", "daily/"]
+  },
+  "secrets": {
+    "allowed_names": ["openai_*"]
+  }
+}
+```
+
+<Info>
+  The capabilities schema supports OAuth refresh tokens, custom auth headers, and rate limit overrides. See `capabilities_schema.rs` for the full specification.
+</Info>
+
+## Host Functions
+
+WASM tools can call these host-provided functions:
+
+### Available Functions (V2 API)
+
+| Function | Capability Required | Description |
+|----------|---------------------|-------------|
+| `log(level, message)` | None | Write to execution log |
+| `time_now()` | None | Get current Unix timestamp |
+| `workspace_read(path)` | `workspace_read` | Read file from workspace |
+| `http_request(method, url, headers, body)` | `http` | Make HTTP request |
+| `tool_invoke(alias, params)` | `tool_invoke` | Call another tool |
+| `secret_exists(name)` | `secrets` | Check if secret exists |
+
+<Warning>
+  Host functions enforce capability checks before execution. Unauthorized calls return an error, not a trap.
+</Warning>
+
+## Best Practices
+
+### For Tool Developers
+
+1. **Request minimal capabilities**: Only request what you need
+2. **Validate inputs**: Don't trust data from users or external APIs
+3. **Handle errors gracefully**: Don't panic on invalid input
+4. **Respect rate limits**: Batch requests when possible
+5. **Document requirements**: Explain why each capability is needed
+
+### For System Administrators
+
+1. **Review capabilities**: Audit `.capabilities.json` before enabling tools
+2. **Monitor usage**: Track credential injection and rate limit hits
+3. **Update allowlists**: Keep endpoint patterns specific and up-to-date
+4. **Rotate secrets**: Use short-lived credentials when possible
+5. **Enable audit logs**: Log all tool executions for forensics
+
+## Related Sections
+
+- [Credential Protection](/security/credential-protection) - Secrets encryption and injection
+- [Prompt Injection Defense](/security/prompt-injection) - Input sanitization and validation
+- [Data Protection](/security/data-protection) - Local storage and encryption

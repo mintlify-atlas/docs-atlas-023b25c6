@@ -1,0 +1,291 @@
+---
+title: Introduction
+description: Learn about IronClaw's philosophy, key features, and how it protects your data while expanding its capabilities
+---
+
+## Your secure personal AI assistant
+
+IronClaw is built on a simple principle: **your AI assistant should work for you, not against you**.
+
+In a world where AI systems are increasingly opaque about data handling and aligned with corporate interests, IronClaw takes a different approach:
+
+- **Your data stays yours** - All information is stored locally, encrypted, and never leaves your control
+- **Transparency by design** - Open source, auditable, no hidden telemetry or data harvesting
+- **Self-expanding capabilities** - Build new tools on the fly without waiting for vendor updates
+- **Defense in depth** - Multiple security layers protect against prompt injection and data exfiltration
+
+IronClaw is the AI assistant you can actually trust with your personal and professional life.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Security first" icon="shield-halved">
+    WASM sandbox, credential protection, prompt injection defense, and endpoint allowlisting keep your data safe
+  </Card>
+  <Card title="Always available" icon="clock">
+    Multi-channel support (REPL, HTTP, Telegram, web gateway), Docker sandbox, and background routines
+  </Card>
+  <Card title="Self-expanding" icon="wrench">
+    Dynamic tool building, MCP protocol support, and plugin architecture let you add capabilities on demand
+  </Card>
+  <Card title="Persistent memory" icon="brain">
+    Hybrid search with full-text and vector embeddings, workspace filesystem, and identity files
+  </Card>
+</CardGroup>
+
+### Security first
+
+<AccordionGroup>
+  <Accordion title="WASM sandbox">
+    All untrusted tools run in isolated WebAssembly containers:
+
+    - **Capability-based permissions** - Explicit opt-in for HTTP, secrets, tool invocation
+    - **Endpoint allowlisting** - HTTP requests only to approved hosts/paths
+    - **Credential injection** - Secrets injected at host boundary, never exposed to WASM code
+    - **Leak detection** - Scans requests and responses for secret exfiltration attempts
+    - **Rate limiting** - Per-tool request limits to prevent abuse
+    - **Resource limits** - Memory, CPU, and execution time constraints
+
+    ```
+    WASM ──► Allowlist ──► Leak Scan ──► Credential ──► Execute ──► Leak Scan ──► WASM
+             Validator     (request)     Injector       Request     (response)
+    ```
+  </Accordion>
+
+  <Accordion title="Credential protection">
+    Secrets are never exposed to tools; injected at the host boundary with leak detection:
+
+    - All secrets encrypted with AES-256-GCM
+    - Stored in system keychain or database
+    - Injected only at execution time
+    - Scanned for exfiltration attempts
+  </Accordion>
+
+  <Accordion title="Prompt injection defense">
+    External content passes through multiple security layers:
+
+    - Pattern-based detection of injection attempts
+    - Content sanitization and escaping
+    - Policy rules with severity levels (Block/Warn/Review/Sanitize)
+    - Tool output wrapping for safe LLM context injection
+  </Accordion>
+
+  <Accordion title="Endpoint allowlisting">
+    HTTP requests only to explicitly approved hosts and paths:
+
+    - Per-tool allowlist configuration
+    - Supports exact matches and wildcards
+    - Blocks unauthorized external calls
+    - Prevents data exfiltration via HTTP
+  </Accordion>
+</AccordionGroup>
+
+### Always available
+
+<AccordionGroup>
+  <Accordion title="Multi-channel support">
+    Connect to IronClaw through multiple channels simultaneously:
+
+    - **REPL** - Interactive command-line interface
+    - **HTTP webhooks** - Receive messages via HTTP POST
+    - **WASM channels** - Telegram, Slack, and custom integrations
+    - **Web gateway** - Browser UI with real-time SSE/WebSocket streaming
+    - **Routines** - Cron schedules, event triggers, webhook handlers
+  </Accordion>
+
+  <Accordion title="Docker sandbox">
+    Execute complex jobs in isolated containers:
+
+    - Isolated container execution with per-job tokens
+    - Orchestrator/worker pattern for distributed execution
+    - Resource limits (memory, CPU, execution time)
+    - Self-repair for stuck operations
+  </Accordion>
+
+  <Accordion title="Parallel jobs">
+    Handle multiple requests concurrently:
+
+    - Independent job contexts
+    - Priority-based scheduling
+    - Real-time progress tracking
+    - Job isolation and sandboxing
+  </Accordion>
+
+  <Accordion title="Heartbeat system">
+    Proactive background execution for monitoring and maintenance:
+
+    - Periodic health checks
+    - Automatic task recovery
+    - Resource cleanup
+    - Scheduled maintenance
+  </Accordion>
+</AccordionGroup>
+
+### Self-expanding
+
+<AccordionGroup>
+  <Accordion title="Dynamic tool building">
+    Describe what you need, and IronClaw builds it as a WASM tool:
+
+    - Natural language tool descriptions
+    - Automatic capability detection
+    - Built-in security sandboxing
+    - Hot-reload without restart
+  </Accordion>
+
+  <Accordion title="MCP protocol">
+    Connect to Model Context Protocol servers for additional capabilities:
+
+    - GitHub, Gmail, Google Drive, Notion, and more
+    - Standard protocol for tool integration
+    - OAuth and API key authentication
+    - Community-built server ecosystem
+  </Accordion>
+
+  <Accordion title="Plugin architecture">
+    Drop in new WASM tools and channels without restarting:
+
+    - Hot-reload for tools and channels
+    - Extension manager for lifecycle control
+    - Capability-based permissions
+    - Registry for discovering extensions
+  </Accordion>
+</AccordionGroup>
+
+### Persistent memory
+
+<AccordionGroup>
+  <Accordion title="Hybrid search">
+    Full-text and vector search using Reciprocal Rank Fusion:
+
+    - Semantic similarity via embeddings
+    - Keyword-based full-text search
+    - Combined ranking for best results
+    - PostgreSQL with pgvector extension
+  </Accordion>
+
+  <Accordion title="Workspace filesystem">
+    Flexible path-based storage for notes, logs, and context:
+
+    - Hierarchical file organization
+    - Markdown and plain text support
+    - Automatic chunking for large files
+    - Search across all workspace content
+  </Accordion>
+
+  <Accordion title="Identity files">
+    Maintain consistent personality and preferences across sessions:
+
+    - IDENTITY.md for agent personality
+    - BOOTSTRAP.md for first-run setup
+    - Custom system prompts
+    - Persistent agent state
+  </Accordion>
+</AccordionGroup>
+
+## OpenClaw heritage
+
+IronClaw is a Rust reimplementation inspired by [OpenClaw](https://github.com/openclaw/openclaw).
+
+Key differences:
+
+<CardGroup cols={2}>
+  <Card title="Rust vs TypeScript">
+    Native performance, memory safety, single binary deployment
+  </Card>
+  <Card title="WASM sandbox vs Docker">
+    Lightweight, capability-based security model for tools
+  </Card>
+  <Card title="PostgreSQL vs SQLite">
+    Production-ready persistence with vector search
+  </Card>
+  <Card title="Security-first design">
+    Multiple defense layers, credential protection, prompt injection defense
+  </Card>
+</CardGroup>
+
+## Architecture overview
+
+IronClaw uses a modular architecture with clear separation of concerns:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                          Channels                              │
+│  ┌──────┐  ┌──────┐   ┌─────────────┐  ┌─────────────┐         │
+│  │ REPL │  │ HTTP │   │WASM Channels│  │ Web Gateway │         │
+│  └──┬───┘  └──┬───┘   └──────┬──────┘  │ (SSE + WS)  │         │
+│     │         │              │         └──────┬──────┘         │
+│     └─────────┴──────────────┴────────────────┘                │
+│                              │                                 │
+│                    ┌─────────▼─────────┐                       │
+│                    │    Agent Loop     │  Intent routing       │
+│                    └────┬──────────┬───┘                       │
+│                         │          │                           │
+│              ┌──────────▼────┐  ┌──▼───────────────┐           │
+│              │  Scheduler    │  │ Routines Engine  │           │
+│              │(parallel jobs)│  │(cron, event, wh) │           │
+│              └──────┬────────┘  └────────┬─────────┘           │
+│                     │                    │                     │
+│       ┌─────────────┼────────────────────┘                     │
+│       │             │                                          │
+│   ┌───▼─────┐  ┌────▼────────────────┐                         │
+│   │ Local   │  │    Orchestrator     │                         │
+│   │Workers  │  │  ┌───────────────┐  │                         │
+│   │(in-proc)│  │  │ Docker Sandbox│  │                         │
+│   └───┬─────┘  │  │   Containers  │  │                         │
+│       │        │  │ ┌───────────┐ │  │                         │
+│       │        │  │ │Worker / CC│ │  │                         │
+│       │        │  │ └───────────┘ │  │                         │
+│       │        │  └───────────────┘  │                         │
+│       │        └─────────┬───────────┘                         │
+│       └──────────────────┤                                     │
+│                          │                                     │
+│              ┌───────────▼──────────┐                          │
+│              │    Tool Registry     │                          │
+│              │  Built-in, MCP, WASM │                          │
+│              └──────────────────────┘                          │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### Core components
+
+| Component | Purpose |
+|-----------|----------|
+| **Agent Loop** | Main message handling and job coordination |
+| **Router** | Classifies user intent (command, query, task) |
+| **Scheduler** | Manages parallel job execution with priorities |
+| **Worker** | Executes jobs with LLM reasoning and tool calls |
+| **Orchestrator** | Container lifecycle, LLM proxying, per-job auth |
+| **Web Gateway** | Browser UI with chat, memory, jobs, logs, extensions, routines |
+| **Routines Engine** | Scheduled (cron) and reactive (event, webhook) background tasks |
+| **Workspace** | Persistent memory with hybrid search |
+| **Safety Layer** | Prompt injection defense and content sanitization |
+
+## Data protection
+
+<Note>
+IronClaw never sends your data to third parties. All storage is local and encrypted.
+</Note>
+
+- **Local storage** - All data stored in your PostgreSQL database
+- **Encryption** - Secrets encrypted with AES-256-GCM
+- **No telemetry** - Zero analytics, tracking, or data sharing
+- **Full audit log** - Complete history of all tool executions
+- **System keychain** - Integration with OS credential storage
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install IronClaw on Windows, macOS, or Linux
+  </Card>
+  <Card title="Quick start" icon="rocket" href="/quickstart">
+    Get up and running in minutes
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/onboarding">
+    Configure LLM providers and database connections
+  </Card>
+  <Card title="Security" icon="shield" href="/concepts/security">
+    Deep dive into IronClaw's security architecture
+  </Card>
+</CardGroup>

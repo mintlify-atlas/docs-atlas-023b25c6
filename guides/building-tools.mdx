@@ -1,0 +1,359 @@
+---
+title: Building WASM Tools
+description: Guide for creating custom WASM tools for IronClaw
+---
+
+IronClaw's WASM tool system lets you extend the agent's capabilities by building sandboxed tools that run securely with explicit permissions.
+
+## Overview
+
+WASM tools are WebAssembly components that:
+- Run in a sandboxed environment with capability-based permissions
+- Execute faster than external processes
+- Declare capabilities in a `capabilities.json` file
+- Never see actual credentials (host injects them at runtime)
+
+## Quick Start
+
+### Prerequisites
+
+- Rust 1.85+ with `wasm32-wasip2` target
+- `wasm-tools` CLI (optional, for component adaptation)
+
+```bash
+rustup target add wasm32-wasip2
+cargo install wasm-tools  # optional
+```
+
+### Project Structure
+
+```
+tools-src/my-tool/
+├── Cargo.toml
+├── src/
+│   └── lib.rs
+└── my-tool.capabilities.json
+```
+
+## Step 1: Create Cargo.toml
+
+```toml
+[package]
+name = "my-tool"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.36"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"      # Optimize for size
+lto = true            # Link-time optimization
+strip = true          # Strip debug symbols
+codegen-units = 1     # Better optimization
+```
+
+## Step 2: Implement the Tool
+
+### Import WIT Bindings
+
+```rust
+wit_bindgen::generate!({
+    world: "tool",
+    path: "../../wit/tool.wit",
+});
+
+use exports::near::agent::tool::{Guest, Input, Output};
+use near::agent::tool_host;
+```
+
+### Implement the Guest Trait
+
+```rust
+struct MyTool;
+
+impl Guest for MyTool {
+    fn execute(input: Input) -> Result<Output, String> {
+        // Parse input parameters
+        let params: MyParams = serde_json::from_str(&input.params)
+            .map_err(|e| format!("Invalid params: {}", e))?;
+
+        // Validate
+        if params.name.is_empty() {
+            return Err("name is required".to_string());
+        }
+
+        // Use host functions
+        tool_host::log(tool_host::LogLevel::Info, "Processing request");
+
+        // Make HTTP requests (credentials auto-injected)
+        let response = tool_host::http_request(
+            "POST",
+            "https://api.example.com/endpoint",
+            &headers_json,
+            Some(&body),
+        )?;
+
+        // Return output
+        Ok(Output {
+            content: result_text,
+            content_type: "text/plain".to_string(),
+            metadata_json: serde_json::to_string(&metadata).unwrap_or_default(),
+        })
+    }
+
+    fn describe() -> String {
+        serde_json::json!({
+            "name": "my_tool",
+            "description": "Does something useful",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The name parameter"
+                    }
+                },
+                "required": ["name"]
+            }
+        })
+        .to_string()
+    }
+}
+
+export!(MyTool);
+```
+
+## Step 3: Create Capabilities File
+
+Create `my-tool.capabilities.json`:
+
+```json
+{
+  "type": "tool",
+  "name": "my_tool",
+  "description": "My custom tool",
+  "capabilities": {
+    "http": {
+      "allowlist": [
+        { "host": "api.example.com", "path_prefix": "/" }
+      ],
+      "rate_limit": {
+        "requests_per_minute": 60,
+        "requests_per_hour": 1000
+      }
+    },
+    "secrets": {
+      "allowed_names": ["my_tool_api_key"]
+    }
+  },
+  "setup": {
+    "required_secrets": [
+      {
+        "name": "my_tool_api_key",
+        "prompt": "Enter your API key",
+        "validation": "^[A-Za-z0-9_-]+$"
+      }
+    ]
+  },
+  "auth": {
+    "secret_name": "my_tool_api_key",
+    "display_name": "My Tool",
+    "instructions": "Get your API key from https://example.com/keys",
+    "setup_url": "https://example.com/keys",
+    "env_var": "MY_TOOL_API_KEY"
+  }
+}
+```
+
+## Step 4: Build the Tool
+
+```bash
+cd tools-src/my-tool
+cargo build --release --target wasm32-wasip2
+
+# Output: target/wasm32-wasip2/release/my_tool.wasm
+```
+
+## Step 5: Install the Tool
+
+```bash
+ironclaw tool install target/wasm32-wasip2/release/my_tool.wasm
+```
+
+Or copy manually:
+
+```bash
+mkdir -p ~/.ironclaw/tools
+cp target/wasm32-wasip2/release/my_tool.wasm ~/.ironclaw/tools/
+cp my-tool.capabilities.json ~/.ironclaw/tools/
+```
+
+## Host Functions Available
+
+### Logging
+
+```rust
+tool_host::log(tool_host::LogLevel::Info, "Message");
+tool_host::log(tool_host::LogLevel::Error, "Error occurred");
+```
+
+### HTTP Requests
+
+```rust
+// Credentials are auto-injected from placeholders
+let url = "https://api.example.com/users?token={MY_TOOL_API_KEY}";
+let headers = serde_json::json!({
+    "Content-Type": "application/json",
+    "Authorization": "Bearer {MY_TOOL_API_KEY}"
+});
+
+let response = tool_host::http_request(
+    "GET",
+    url,
+    &headers.to_string(),
+    None,
+)?;
+```
+
+### Workspace Access
+
+```rust
+// Read file from workspace
+let content = tool_host::workspace_read("notes/todo.txt")?;
+
+// Write file to workspace
+tool_host::workspace_write("output/result.json", &json_data)?;
+```
+
+### Time
+
+```rust
+let timestamp_ms = tool_host::now_millis();
+```
+
+## Credential Injection
+
+**Never hardcode secrets!** Use placeholders:
+
+```rust
+// URL placeholders
+let url = "https://api.example.com/endpoint?key={MY_TOOL_API_KEY}";
+
+// Header placeholders
+let headers = serde_json::json!({
+    "Authorization": "Bearer {MY_TOOL_API_KEY}"
+});
+
+// The host replaces {MY_TOOL_API_KEY} with the actual credential
+```
+
+Placeholder format: `{SECRET_NAME}` where `SECRET_NAME` is the credential name in uppercase with underscores.
+
+## Testing
+
+Add tests to `lib.rs`:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_params() {
+        let json = r#"{"name": "test"}"#;
+        let params: MyParams = serde_json::from_str(json).unwrap();
+        assert_eq!(params.name, "test");
+    }
+
+    #[test]
+    fn test_validation() {
+        let params = MyParams {
+            name: String::new(),
+        };
+        assert!(validate(&params).is_err());
+    }
+}
+```
+
+Run tests:
+
+```bash
+cargo test
+```
+
+## LLM-Assisted Building
+
+IronClaw can build tools for you:
+
+```
+User: Build me a tool that checks GitHub PR status
+
+Agent: I'll create a GitHub PR checker tool...
+```
+
+The agent will:
+1. Generate the Rust source code
+2. Create the capabilities file
+3. Build to WASM
+4. Install the tool
+5. Make it available for use
+
+See `src/tools/builder/` for implementation details.
+
+## Troubleshooting
+
+### Compilation Errors
+
+**Error: can't find crate for `std`**
+
+Ensure you're using `wasm32-wasip2` target:
+
+```bash
+rustup target add wasm32-wasip2
+cargo build --target wasm32-wasip2 --release
+```
+
+### Credential Placeholders Not Replaced
+
+1. Check the secret name matches (lowercase with underscores in capabilities)
+2. Verify the secret is in `allowed_names` in capabilities
+3. Ensure the secret is stored: `ironclaw tool auth my_tool`
+4. Check logs for "unresolved placeholders" warnings
+
+### HTTP Requests Blocked
+
+1. Add the host to `http.allowlist` in capabilities
+2. Check path_prefix matches the request path
+3. Verify the host is exactly as it appears in the URL
+
+## Best Practices
+
+1. **Keep tools focused**: One tool, one purpose
+2. **Validate inputs**: Check all parameters before processing
+3. **Handle errors gracefully**: Return clear error messages
+4. **Use rate limits**: Protect against abuse
+5. **Test thoroughly**: Include unit tests and integration tests
+6. **Document parameters**: Clear descriptions in the schema
+7. **Never expose secrets**: Use placeholders, not hardcoded values
+
+## Examples
+
+Check the bundled tools in `tools-src/`:
+
+- `github/` - GitHub API integration
+- `slack/` - Slack messaging
+- `gmail/` - Gmail operations
+- `google-calendar/` - Calendar management
+- `web-search/` - Web search
+
+## Next Steps
+
+- Read the [WASM vs MCP guide](/guides/mcp-servers) to understand when to use each
+- Explore [Docker sandbox](/guides/docker-sandbox) for command execution
+- Learn about [building channels](/guides/building-channels) for messaging platforms

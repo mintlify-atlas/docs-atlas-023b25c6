@@ -1,0 +1,522 @@
+---
+title: 'Dynamic Tool System'
+description: 'Build and execute tools at runtime with MCP, WASM, and LLM-powered code generation'
+icon: 'wrench'
+---
+
+IronClaw's tool system is designed for extensibility and safety. The agent can use pre-built tools, load external tool servers via MCP, execute sandboxed WASM tools, and even build new tools on-demand using LLM-driven code generation.
+
+## Architecture
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Software Build Loop                                 │
+│                                                                              │
+│  1. Analyze requirement ─▶ Determine project type, language, structure      │
+│  2. Generate scaffold   ─▶ Create initial project files                     │
+│  3. Implement code      ─▶ Write the actual implementation                  │
+│  4. Build/compile       ─▶ Run build commands (cargo, npm, etc.)            │
+│  5. Fix errors          ─▶ Parse errors, modify code, retry                 │
+│  6. Test                ─▶ Run tests, fix failures                          │
+│  7. Package             ─▶ Produce final artifact                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Tool Types
+
+<CardGroup cols={3}>
+  <Card title="Built-in" icon="box">
+    Core tools written in Rust (shell, file ops, HTTP, memory)
+  </Card>
+  <Card title="MCP Servers" icon="server">
+    External tool servers via Model Context Protocol
+  </Card>
+  <Card title="WASM Tools" icon="microchip">
+    Sandboxed WebAssembly tools with capability-based security
+  </Card>
+</CardGroup>
+
+## Built-in Tools
+
+IronClaw includes essential tools out of the box:
+
+### File Operations
+
+```rust
+// Read file
+{
+  "tool": "read_file",
+  "path": "src/main.rs"
+}
+
+// Write file
+{
+  "tool": "write_file",
+  "path": "config.json",
+  "content": "{\"key\": \"value\"}"
+}
+
+// List directory
+{
+  "tool": "list_dir",
+  "path": "src/"
+}
+```
+
+### Shell Execution
+
+```rust
+{
+  "tool": "shell",
+  "command": "cargo build --release",
+  "timeout": 300
+}
+```
+
+<Warning>
+Shell commands require approval by default. Configure `TOOL_APPROVAL_MODE=auto` to skip prompts.
+</Warning>
+
+### HTTP Requests
+
+```rust
+{
+  "tool": "http",
+  "url": "https://api.github.com/repos/ironclaw/ironclaw",
+  "method": "GET",
+  "headers": {
+    "Accept": "application/json"
+  }
+}
+```
+
+### Memory Operations
+
+```rust
+// Write to workspace
+{
+  "tool": "memory_write",
+  "target": "projects/alpha/notes.md",
+  "content": "# Project Alpha\n\nStatus: In progress"
+}
+
+// Search workspace
+{
+  "tool": "memory_search",
+  "query": "deployment process",
+  "limit": 5
+}
+
+// Append to daily log
+{
+  "tool": "memory_append",
+  "target": "daily",
+  "content": "Completed code review for PR #42"
+}
+```
+
+## MCP Integration
+
+[Model Context Protocol](https://modelcontextprotocol.io/) allows connecting to external tool servers:
+
+### Configuration
+
+Create `~/.ironclaw/mcp_servers.json`:
+
+```json
+{
+  "servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"],
+      "timeout": 30
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "oauth": {
+        "provider": "github",
+        "client_id": "your-client-id",
+        "scopes": ["repo", "workflow"]
+      }
+    },
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"]
+    }
+  }
+}
+```
+
+### OAuth Authentication
+
+For hosted MCP servers that require OAuth:
+
+```bash
+# Server initiates OAuth flow
+# User is prompted to visit auth URL
+
+# After authorization, token is stored
+# Tokens are auto-refreshed before expiry
+```
+
+### Available MCP Servers
+
+<CardGroup cols={2}>
+  <Card title="Filesystem" icon="folder">
+    Read/write access to specified directories
+  </Card>
+  <Card title="GitHub" icon="github">
+    Repository operations, issues, PRs, workflows
+  </Card>
+  <Card title="GitLab" icon="gitlab">
+    Project management and CI/CD
+  </Card>
+  <Card title="PostgreSQL" icon="database">
+    Query and schema operations
+  </Card>
+  <Card title="Slack" icon="slack">
+    Send messages, list channels
+  </Card>
+  <Card title="Google Drive" icon="google">
+    File operations in Drive
+  </Card>
+</CardGroup>
+
+### Tool Discovery
+
+```rust
+use ironclaw::tools::mcp::McpClient;
+
+// Connect to MCP server
+let client = McpClient::new("npx -y @modelcontextprotocol/server-github");
+
+// List available tools
+let tools = client.create_tools().await?;
+for tool in tools {
+    println!("{}: {}", tool.name(), tool.description());
+}
+
+// Tools are automatically registered with the agent
+```
+
+## WASM Tools
+
+WebAssembly tools run in a sandboxed environment with strict security controls:
+
+### Security Model
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              WASM Tool Execution                             │
+│                                                                              │
+│   WASM Tool ──▶ Host Function ──▶ Allowlist ──▶ Credential ──▶ Execute     │
+│   (untrusted)   (boundary)        Validator     Injector       Request      │
+│                                                                    │        │
+│                                                                    ▼        │
+│                              ◀────── Leak Detector ◀────── Response        │
+│                          (sanitized, no secrets)                            │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Constraints
+
+| Threat | Mitigation |
+|--------|------------|
+| CPU exhaustion | Fuel metering |
+| Memory exhaustion | 10MB default limit |
+| Infinite loops | Epoch interruption + timeout |
+| Filesystem access | No WASI FS, only host workspace_read |
+| Network access | Allowlisted endpoints only |
+| Credential exposure | Injection at host boundary only |
+| Secret exfiltration | Leak detector scans all outputs |
+
+### Capabilities
+
+Tools declare required capabilities in `tool_name.capabilities.json`:
+
+```json
+{
+  "http": {
+    "allowed_endpoints": [
+      {
+        "host": "api.openai.com",
+        "path_prefix": "/v1/",
+        "methods": ["POST"]
+      }
+    ],
+    "rate_limit": {
+      "requests_per_minute": 60
+    }
+  },
+  "workspace": {
+    "read": true,
+    "write": false
+  },
+  "secrets": {
+    "env_vars": ["OPENAI_API_KEY"]
+  },
+  "tool_invoke": {
+    "allowed_tools": ["shell", "read_file"]
+  }
+}
+```
+
+### Creating a WASM Tool
+
+IronClaw provides a Rust template:
+
+```rust
+use ironclaw_guest::{
+    bindings::{http_request, workspace_read},
+    Guest, Tool, ToolError,
+};
+
+struct MyTool;
+
+impl Tool for MyTool {
+    fn name() -> String {
+        "my_tool".to_string()
+    }
+
+    fn description() -> String {
+        "Fetches data from an API".to_string()
+    }
+
+    fn input_schema() -> String {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"}
+            },
+            "required": ["query"]
+        }).to_string()
+    }
+
+    fn execute(input: String) -> Result<String, ToolError> {
+        let params: serde_json::Value = serde_json::from_str(&input)?;
+        let query = params["query"].as_str().unwrap();
+
+        // HTTP call (validated against allowlist)
+        let response = http_request(
+            "https://api.example.com/search",
+            "GET",
+            &[("q", query)],
+            &[],
+            None,
+        )?;
+
+        Ok(response.body)
+    }
+}
+
+ironclaw_guest::export_tool!(MyTool);
+```
+
+### Building WASM Tools
+
+```bash
+# Build with wasm32-wasip2 target
+cargo build --target wasm32-wasip2 --release
+
+# The tool is automatically loaded from target/wasm32-wasip2/release/
+ironclaw
+```
+
+<Tip>
+Use the `build_software` tool to have the agent build WASM tools for you at runtime.
+</Tip>
+
+## Dynamic Tool Building
+
+The agent can build new tools on-demand using LLM-driven code generation:
+
+### Build Process
+
+1. **Analyze**: Parse natural language requirement
+2. **Scaffold**: Generate project structure
+3. **Implement**: Write code with LLM
+4. **Build**: Compile with appropriate toolchain
+5. **Fix**: Parse errors and iterate
+6. **Test**: Run test harness
+7. **Validate**: Check WASM interface (for WASM tools)
+8. **Register**: Auto-register if successful
+
+### Example: Build a Tool
+
+```rust
+{
+  "tool": "build_software",
+  "requirement": {
+    "name": "weather_fetcher",
+    "description": "Fetch weather from OpenWeatherMap API",
+    "software_type": "wasm_tool",
+    "language": "rust",
+    "capabilities": ["http", "secrets"]
+  }
+}
+```
+
+The agent will:
+1. Create a Cargo project
+2. Write the tool implementation
+3. Add HTTP endpoint to capabilities
+4. Build to wasm32-wasip2
+5. Register the tool for immediate use
+
+### Builder Configuration
+
+```rust
+BuilderConfig {
+    build_dir: PathBuf::from("/tmp/ironclaw-builds"),
+    max_iterations: 10,
+    timeout: Duration::from_secs(600),
+    validate_wasm: true,
+    run_tests: true,
+    auto_register: true,
+    wasm_output_dir: Some(PathBuf::from("~/.ironclaw/tools")),
+}
+```
+
+### Supported Languages
+
+<CardGroup cols={3}>
+  <Card title="Rust" icon="rust">
+    Native WASM support, best performance
+  </Card>
+  <Card title="Python" icon="python">
+    For scripts and data processing
+  </Card>
+  <Card title="TypeScript" icon="js">
+    For web API interactions
+  </Card>
+  <Card title="Go" icon="golang">
+    For systems tools
+  </Card>
+  <Card title="JavaScript" icon="node-js">
+    Interpreted, no build step
+  </Card>
+  <Card title="Bash" icon="terminal">
+    Shell scripts
+  </Card>
+</CardGroup>
+
+## Tool Registry
+
+The `ToolRegistry` manages all available tools:
+
+```rust
+use ironclaw::tools::{ToolRegistry, Tool};
+
+let registry = ToolRegistry::new();
+
+// Register built-in tools
+registry.register_builtin_tools();
+
+// Register MCP servers
+for server in mcp_servers {
+    let client = McpClient::new(server.command);
+    let tools = client.create_tools().await?;
+    for tool in tools {
+        registry.register(tool);
+    }
+}
+
+// Load WASM tools
+let wasm_tools = discover_tools("~/.ironclaw/tools")?;
+for tool in wasm_tools {
+    registry.register(tool);
+}
+
+// Get tool definitions for LLM
+let definitions = registry.tool_definitions().await;
+```
+
+### Tool Execution
+
+```rust
+use ironclaw::context::JobContext;
+
+let ctx = JobContext::new(user_id, thread_id);
+
+let output = registry
+    .execute(
+        "shell",
+        serde_json::json!({
+            "command": "ls -la"
+        }),
+        &ctx,
+    )
+    .await?;
+
+println!("Output: {}", output.content);
+```
+
+## Approval System
+
+Sensitive tools require user approval:
+
+```rust
+pub enum ApprovalRequirement {
+    None,           // Execute immediately
+    Once,           // Prompt first time
+    Always,         // Prompt every time
+    SessionAlways,  // Prompt every time this session
+}
+```
+
+### Configuration
+
+```bash
+# Global approval mode
+export TOOL_APPROVAL_MODE="auto"  # auto, prompt, strict
+
+# Per-tool overrides
+export TOOL_APPROVAL_SHELL="always"
+export TOOL_APPROVAL_HTTP="once"
+export TOOL_APPROVAL_MEMORY_WRITE="none"
+```
+
+### Approval Flow
+
+```text
+1. Agent requests tool execution
+2. Registry checks ApprovalRequirement
+3. If required, prompt sent via channel
+4. User responds: yes/no/always
+5. Registry stores approval decision
+6. Tool executes if approved
+```
+
+## Rate Limiting
+
+Per-tool rate limits prevent abuse:
+
+```rust
+pub struct ToolRateLimitConfig {
+    pub requests_per_minute: u32,
+    pub burst_size: u32,
+    pub cooldown: Duration,
+}
+
+// Example: HTTP tool
+ToolRateLimitConfig {
+    requests_per_minute: 60,
+    burst_size: 10,
+    cooldown: Duration::from_secs(1),
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Workspace" icon="folder" href="/features/workspace-memory">
+    Learn about persistent memory
+  </Card>
+  <Card title="Sandbox" icon="docker" href="/features/sandbox">
+    Explore Docker-based job execution
+  </Card>
+</CardGroup>

@@ -1,0 +1,414 @@
+---
+title: "Database Setup"
+description: "Configure PostgreSQL or libSQL for IronClaw persistence"
+---
+
+## Overview
+
+IronClaw supports two database backends:
+
+- **PostgreSQL** - Production-grade, requires a running server
+- **libSQL** - Embedded SQLite, zero dependencies, optional Turso cloud sync
+
+The onboarding wizard helps you choose and configure either option. This guide covers manual configuration and advanced settings.
+
+## PostgreSQL
+
+### Requirements
+
+- PostgreSQL 15 or later
+- [pgvector](https://github.com/pgvector/pgvector) extension (required for embeddings)
+
+### Installation
+
+<Tabs>
+  <Tab title="macOS">
+    ```bash
+    # Install PostgreSQL and pgvector
+    brew install postgresql@15 pgvector
+    
+    # Start PostgreSQL
+    brew services start postgresql@15
+    
+    # Create database
+    createdb ironclaw
+    
+    # Enable pgvector
+    psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    ```
+  </Tab>
+  
+  <Tab title="Ubuntu/Debian">
+    ```bash
+    # Install PostgreSQL
+    sudo apt update
+    sudo apt install postgresql-15
+    
+    # Install pgvector
+    sudo apt install postgresql-15-pgvector
+    
+    # Start PostgreSQL
+    sudo systemctl start postgresql
+    
+    # Create database (as postgres user)
+    sudo -u postgres createdb ironclaw
+    sudo -u postgres psql ironclaw -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    ```
+  </Tab>
+  
+  <Tab title="Docker">
+    ```bash
+    # Use official pgvector image
+    docker run -d \
+      --name ironclaw-db \
+      -e POSTGRES_PASSWORD=password \
+      -e POSTGRES_DB=ironclaw \
+      -p 5432:5432 \
+      pgvector/pgvector:pg15
+    
+    # Enable pgvector (after container starts)
+    docker exec ironclaw-db psql -U postgres -d ironclaw \
+      -c "CREATE EXTENSION IF NOT EXISTS vector;"
+    ```
+  </Tab>
+</Tabs>
+
+### Configuration
+
+Set the database URL in your environment or `~/.ironclaw/.env`:
+
+```bash
+DATABASE_BACKEND=postgres
+DATABASE_URL=postgres://user:password@localhost:5432/ironclaw
+DATABASE_POOL_SIZE=10  # optional, default: 10
+```
+
+**URL format:**
+```
+postgres://username:password@host:port/database
+```
+
+### Connection Pool
+
+Configure the connection pool size:
+
+```bash
+DATABASE_POOL_SIZE=10  # Max concurrent connections
+```
+
+**Recommendations:**
+- **Local development:** 5-10 connections
+- **Production:** 20-50 connections (depends on workload)
+- **Docker/VPS:** Start with 10, adjust based on `pg_stat_activity`
+
+### SSL/TLS Configuration
+
+Control SSL mode for PostgreSQL connections:
+
+```bash
+DATABASE_SSLMODE=prefer  # default
+```
+
+**Options:**
+
+| Mode | Behavior |
+|------|----------|
+| `disable` | Never use TLS (plaintext only) |
+| `prefer` | Try TLS first, fall back to plaintext |
+| `require` | Require TLS; fail if unavailable |
+
+**Recommendations:**
+- **Local PostgreSQL:** `disable` (no TLS needed)
+- **Managed databases (Neon, Supabase, RDS):** `prefer` or `require`
+- **VPS/self-hosted:** `prefer` (default, works everywhere)
+
+### Migrations
+
+Migrations run automatically on first connection. To run manually:
+
+```bash
+ironclaw onboard  # Prompts to run migrations
+```
+
+Or apply with refinery CLI:
+
+```bash
+cargo install refinery_cli
+refinery migrate -e DATABASE_URL -p migrations/
+```
+
+### Cloud Providers
+
+<AccordionGroup>
+  <Accordion title="Neon" icon="cloud">
+    [Neon](https://neon.tech) provides serverless Postgres with automatic scaling.
+    
+    ```bash
+    DATABASE_URL=postgres://user:password@ep-xxx.region.aws.neon.tech/ironclaw?sslmode=require
+    ```
+    
+    pgvector is pre-installed. Set `DATABASE_SSLMODE=require`.
+  </Accordion>
+  
+  <Accordion title="Supabase" icon="database">
+    [Supabase](https://supabase.com) includes Postgres with pgvector.
+    
+    ```bash
+    DATABASE_URL=postgres://postgres:password@db.xxx.supabase.co:5432/postgres
+    ```
+    
+    Enable pgvector in SQL Editor:
+    ```sql
+    CREATE EXTENSION IF NOT EXISTS vector;
+    ```
+  </Accordion>
+  
+  <Accordion title="Railway" icon="train">
+    [Railway](https://railway.app) provides managed Postgres.
+    
+    ```bash
+    DATABASE_URL=${{Postgres.DATABASE_URL}}  # Railway variable
+    ```
+    
+    Install pgvector via Railway's Postgres plugin settings.
+  </Accordion>
+  
+  <Accordion title="AWS RDS" icon="aws">
+    [RDS for PostgreSQL](https://aws.amazon.com/rds/postgresql/) with pgvector.
+    
+    ```bash
+    DATABASE_URL=postgres://user:password@instance.region.rds.amazonaws.com:5432/ironclaw
+    DATABASE_SSLMODE=require
+    ```
+    
+    Enable pgvector:
+    ```sql
+    CREATE EXTENSION IF NOT EXISTS vector;
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="pgvector not found">
+    **Error:** `pgvector extension not found`
+    
+    **Solution:**
+    - macOS: `brew install pgvector`
+    - Ubuntu: `apt install postgresql-15-pgvector`
+    - Docker: Use `pgvector/pgvector:pg15` image
+    - Source: [github.com/pgvector/pgvector#installation](https://github.com/pgvector/pgvector#installation)
+    
+    Then enable in your database:
+    ```sql
+    CREATE EXTENSION IF NOT EXISTS vector;
+    ```
+  </Accordion>
+  
+  <Accordion title="PostgreSQL version too old">
+    **Error:** `PostgreSQL 14 detected. IronClaw requires PostgreSQL 15 or later`
+    
+    **Solution:** Upgrade PostgreSQL:
+    - macOS: `brew upgrade postgresql`
+    - Ubuntu: Follow [postgresql.org/download/linux/ubuntu/](https://www.postgresql.org/download/linux/ubuntu/)
+    - Docker: Use `pgvector/pgvector:pg15` or later
+  </Accordion>
+  
+  <Accordion title="Connection refused">
+    **Error:** `connection refused` or `could not connect to server`
+    
+    **Check PostgreSQL is running:**
+    ```bash
+    # macOS
+    brew services list | grep postgresql
+    
+    # Linux
+    systemctl status postgresql
+    
+    # Docker
+    docker ps | grep postgres
+    ```
+    
+    **Check port:**
+    ```bash
+    lsof -i :5432  # Should show postgres
+    ```
+    
+    **Check `pg_hba.conf`** if connecting remotely.
+  </Accordion>
+  
+  <Accordion title="Authentication failed">
+    **Error:** `password authentication failed`
+    
+    **Check password:**
+    ```bash
+    psql -U username -d ironclaw  # Test connection
+    ```
+    
+    **Reset password:**
+    ```sql
+    ALTER USER username WITH PASSWORD 'newpassword';
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## libSQL (Embedded)
+
+### Overview
+
+libSQL is an embedded SQLite database with optional Turso cloud sync. No external database server required.
+
+**Benefits:**
+- Zero dependencies
+- Single file storage
+- Automatic migrations
+- Optional remote sync
+
+### Local Setup
+
+```bash
+DATABASE_BACKEND=libsql
+LIBSQL_PATH=~/.ironclaw/ironclaw.db  # default
+```
+
+The database file is created automatically on first run.
+
+### Turso Cloud Sync
+
+[Turso](https://turso.tech) provides remote replicas for libSQL databases.
+
+**Setup:**
+
+1. Create a Turso database:
+   ```bash
+   turso db create ironclaw
+   ```
+
+2. Get connection details:
+   ```bash
+   turso db show ironclaw
+   ```
+
+3. Create an auth token:
+   ```bash
+   turso db tokens create ironclaw
+   ```
+
+4. Configure IronClaw:
+   ```bash
+   DATABASE_BACKEND=libsql
+   LIBSQL_PATH=~/.ironclaw/ironclaw.db
+   LIBSQL_URL=libsql://your-db.turso.io
+   LIBSQL_AUTH_TOKEN=your-token
+   ```
+
+**How it works:**
+- Local file (`LIBSQL_PATH`) is the primary database
+- Changes sync to the remote replica (`LIBSQL_URL`)
+- Other instances can read from the remote replica
+
+### Configuration Options
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `DATABASE_BACKEND` | Backend type | `postgres` |
+| `LIBSQL_PATH` | Local database file | `~/.ironclaw/ironclaw.db` |
+| `LIBSQL_URL` | Turso remote URL (optional) | - |
+| `LIBSQL_AUTH_TOKEN` | Turso auth token (required if URL is set) | - |
+
+### Migrations
+
+Migrations run automatically on first connection (idempotent `CREATE IF NOT EXISTS`).
+
+### Limitations
+
+- **Concurrency:** SQLite uses file-level locking (fine for single-user, not ideal for high-concurrency)
+- **Vector search:** Uses JSON instead of native vector types (slower than pgvector)
+- **Backups:** Copy the `.db` file (or use Turso cloud backups)
+
+### When to Use libSQL
+
+**Good for:**
+- Personal use / single-user
+- Development / testing
+- Lightweight deployments
+- Portable installations
+
+**Use PostgreSQL if:**
+- Multiple concurrent users
+- High-throughput workloads
+- Large-scale vector search
+- Production deployments
+
+## Switching Backends
+
+To switch from PostgreSQL to libSQL (or vice versa):
+
+1. **Export data** (if needed):
+   ```bash
+   # PostgreSQL: pg_dump
+   pg_dump ironclaw > backup.sql
+   ```
+
+2. **Change configuration:**
+   ```bash
+   # Edit ~/.ironclaw/.env
+   DATABASE_BACKEND=libsql
+   LIBSQL_PATH=~/.ironclaw/ironclaw.db
+   ```
+
+3. **Re-run onboarding:**
+   ```bash
+   ironclaw onboard
+   ```
+
+4. **Migrations run automatically** on first connection.
+
+<Warning>
+  Switching backends creates a fresh database. Export/import data manually if needed.
+</Warning>
+
+## Environment Variables
+
+### PostgreSQL
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `DATABASE_BACKEND` | Backend type (`postgres` or `libsql`) | `postgres` |
+| `DATABASE_URL` | PostgreSQL connection URL | - |
+| `DATABASE_POOL_SIZE` | Max connections in pool | `10` |
+| `DATABASE_SSLMODE` | SSL mode (`disable`, `prefer`, `require`) | `prefer` |
+
+### libSQL
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `DATABASE_BACKEND` | Backend type | `postgres` |
+| `LIBSQL_PATH` | Local database file | `~/.ironclaw/ironclaw.db` |
+| `LIBSQL_URL` | Turso remote URL (optional) | - |
+| `LIBSQL_AUTH_TOKEN` | Turso auth token | - |
+
+## Backups
+
+### PostgreSQL
+
+```bash
+# Backup
+pg_dump ironclaw > backup.sql
+
+# Restore
+psql ironclaw < backup.sql
+```
+
+### libSQL
+
+```bash
+# Backup (copy file)
+cp ~/.ironclaw/ironclaw.db ~/.ironclaw/ironclaw.db.backup
+
+# Restore
+cp ~/.ironclaw/ironclaw.db.backup ~/.ironclaw/ironclaw.db
+```
+
+**Turso cloud:** Automatic backups via Turso dashboard.

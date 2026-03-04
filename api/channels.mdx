@@ -1,0 +1,353 @@
+---
+title: 'Channel API'
+description: 'Multi-channel input system for receiving messages from external sources'
+---
+
+## Overview
+
+Channels receive messages from external sources (CLI, HTTP, Signal, etc.) and convert them to a unified message format for the agent to process.
+
+## Architecture
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                         ChannelManager                              │
+│                                                                     │
+│   ┌──────────────┐   ┌─────────────┐   ┌─────────────┐             │
+│   │ ReplChannel  │   │ HttpChannel │   │ WasmChannel │   ...       │
+│   └──────┬───────┘   └──────┬──────┘   └──────┬──────┘             │
+│          │                 │                 │                      │
+│          └─────────────────┴─────────────────┘                      │
+│                            │                                        │
+│                   select_all (futures)                              │
+│                            │                                        │
+│                            ▼                                        │
+│                     MessageStream                                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Channel Trait
+
+All channels implement the `Channel` trait.
+
+```rust src/channels/channel.rs
+#[async_trait]
+pub trait Channel: Send + Sync {
+    fn name(&self) -> &str;
+    async fn start(&self) -> Result<MessageStream, ChannelError>;
+    async fn respond(&self, msg: &IncomingMessage, response: OutgoingResponse) -> Result<(), ChannelError>;
+    async fn send_status(&self, status: StatusUpdate, metadata: &serde_json::Value) -> Result<(), ChannelError>;
+    async fn broadcast(&self, user_id: &str, response: OutgoingResponse) -> Result<(), ChannelError>;
+    async fn health_check(&self) -> Result<(), ChannelError>;
+    fn conversation_context(&self, metadata: &serde_json::Value) -> HashMap<String, String>;
+    async fn shutdown(&self) -> Result<(), ChannelError>;
+}
+```
+
+### name
+
+```rust
+fn name(&self) -> &str
+```
+
+Returns the channel identifier (e.g., "cli", "slack", "telegram", "http").
+
+### start
+
+```rust
+async fn start(&self) -> Result<MessageStream, ChannelError>
+```
+
+Starts listening for messages. Returns a stream of incoming messages. The channel should handle reconnection and error recovery internally.
+
+### respond
+
+```rust
+async fn respond(
+    &self,
+    msg: &IncomingMessage,
+    response: OutgoingResponse,
+) -> Result<(), ChannelError>
+```
+
+Sends a response back to the user in the context of the original message (same channel, same thread if applicable).
+
+### send_status
+
+```rust
+async fn send_status(
+    &self,
+    status: StatusUpdate,
+    metadata: &serde_json::Value,
+) -> Result<(), ChannelError>
+```
+
+Sends a status update (thinking, tool execution, etc.). The metadata contains channel-specific routing info.
+
+### broadcast
+
+```rust
+async fn broadcast(
+    &self,
+    user_id: &str,
+    response: OutgoingResponse,
+) -> Result<(), ChannelError>
+```
+
+Sends a proactive message without a prior incoming message. Used for alerts, heartbeat notifications, and other agent-initiated communication.
+
+### health_check
+
+```rust
+async fn health_check(&self) -> Result<(), ChannelError>
+```
+
+Checks if the channel is healthy and able to send/receive messages.
+
+### conversation_context
+
+```rust
+fn conversation_context(&self, metadata: &serde_json::Value) -> HashMap<String, String>
+```
+
+Extracts conversation context from message metadata for the system prompt. Returns key-value pairs like "sender", "sender_uuid", "group" that help the LLM understand who it's talking to.
+
+### shutdown
+
+```rust
+async fn shutdown(&self) -> Result<(), ChannelError>
+```
+
+Gracefully shuts down the channel.
+
+## IncomingMessage
+
+A message received from an external channel.
+
+```rust src/channels/channel.rs
+pub struct IncomingMessage {
+    pub id: Uuid,
+    pub channel: String,
+    pub user_id: String,
+    pub user_name: Option<String>,
+    pub content: String,
+    pub thread_id: Option<String>,
+    pub received_at: DateTime<Utc>,
+    pub metadata: serde_json::Value,
+}
+```
+
+<ResponseField name="id" type="Uuid" required>
+  Unique message ID
+</ResponseField>
+
+<ResponseField name="channel" type="String" required>
+  Channel this message came from
+</ResponseField>
+
+<ResponseField name="user_id" type="String" required>
+  User identifier within the channel
+</ResponseField>
+
+<ResponseField name="user_name" type="Option<String>">
+  Optional display name
+</ResponseField>
+
+<ResponseField name="content" type="String" required>
+  Message content
+</ResponseField>
+
+<ResponseField name="thread_id" type="Option<String>">
+  Thread/conversation ID for threaded conversations
+</ResponseField>
+
+<ResponseField name="received_at" type="DateTime<Utc>" required>
+  When the message was received
+</ResponseField>
+
+<ResponseField name="metadata" type="serde_json::Value" required>
+  Channel-specific metadata
+</ResponseField>
+
+## OutgoingResponse
+
+Response to send back to a channel.
+
+```rust src/channels/channel.rs
+pub struct OutgoingResponse {
+    pub content: String,
+    pub thread_id: Option<String>,
+    pub attachments: Vec<String>,
+    pub metadata: serde_json::Value,
+}
+```
+
+<ResponseField name="content" type="String" required>
+  The content to send
+</ResponseField>
+
+<ResponseField name="thread_id" type="Option<String>">
+  Optional thread ID to reply in
+</ResponseField>
+
+<ResponseField name="attachments" type="Vec<String>">
+  Optional file paths to attach
+</ResponseField>
+
+<ResponseField name="metadata" type="serde_json::Value">
+  Channel-specific metadata for the response
+</ResponseField>
+
+## StatusUpdate
+
+Status update types for showing agent activity.
+
+```rust src/channels/channel.rs
+pub enum StatusUpdate {
+    Thinking(String),
+    ToolStarted { name: String },
+    ToolCompleted { name: String, success: bool },
+    ToolResult { name: String, preview: String },
+    StreamChunk(String),
+    Status(String),
+    JobStarted { job_id: String, title: String, browse_url: String },
+    ApprovalNeeded { request_id: String, tool_name: String, description: String, parameters: serde_json::Value },
+    AuthRequired { extension_name: String, instructions: Option<String>, auth_url: Option<String>, setup_url: Option<String> },
+    AuthCompleted { extension_name: String, success: bool, message: String },
+}
+```
+
+## ChannelManager
+
+Manages multiple input channels and merges their message streams.
+
+### Constructor
+
+```rust src/channels/manager.rs
+pub fn new() -> Self
+```
+
+Creates a new channel manager.
+
+### add
+
+```rust src/channels/manager.rs
+pub async fn add(&self, channel: Box<dyn Channel>)
+```
+
+Adds a channel to the manager.
+
+### hot_add
+
+```rust src/channels/manager.rs
+pub async fn hot_add(&self, channel: Box<dyn Channel>) -> Result<(), ChannelError>
+```
+
+Hot-adds a channel to a running agent. Starts the channel, registers it for respond/broadcast, and spawns a task to forward its messages.
+
+### start_all
+
+```rust src/channels/manager.rs
+pub async fn start_all(&self) -> Result<MessageStream, ChannelError>
+```
+
+Starts all channels and returns a merged stream of messages.
+
+### respond
+
+```rust src/channels/manager.rs
+pub async fn respond(
+    &self,
+    msg: &IncomingMessage,
+    response: OutgoingResponse,
+) -> Result<(), ChannelError>
+```
+
+Sends a response to a specific channel.
+
+### send_status
+
+```rust src/channels/manager.rs
+pub async fn send_status(
+    &self,
+    channel_name: &str,
+    status: StatusUpdate,
+    metadata: &serde_json::Value,
+) -> Result<(), ChannelError>
+```
+
+Sends a status update to a specific channel.
+
+### broadcast
+
+```rust src/channels/manager.rs
+pub async fn broadcast(
+    &self,
+    channel_name: &str,
+    user_id: &str,
+    response: OutgoingResponse,
+) -> Result<(), ChannelError>
+```
+
+Broadcasts a message to a specific user on a specific channel.
+
+### broadcast_all
+
+```rust src/channels/manager.rs
+pub async fn broadcast_all(
+    &self,
+    user_id: &str,
+    response: OutgoingResponse,
+) -> Vec<(String, Result<(), ChannelError>)>
+```
+
+Broadcasts a message to all channels.
+
+### inject_sender
+
+```rust src/channels/manager.rs
+pub fn inject_sender(&self) -> mpsc::Sender<IncomingMessage>
+```
+
+Get a clone of the injection sender. Background tasks use this to push messages into the agent loop.
+
+## Example: Custom Channel
+
+```rust
+use ironclaw::channels::{Channel, IncomingMessage, MessageStream, OutgoingResponse};
+use async_trait::async_trait;
+
+#[derive(Debug)]
+pub struct MyChannel;
+
+#[async_trait]
+impl Channel for MyChannel {
+    fn name(&self) -> &str {
+        "mychannel"
+    }
+    
+    async fn start(&self) -> Result<MessageStream, ChannelError> {
+        // Create a stream that listens for messages
+        // Return a stream of IncomingMessage
+        unimplemented!()
+    }
+    
+    async fn respond(
+        &self,
+        msg: &IncomingMessage,
+        response: OutgoingResponse,
+    ) -> Result<(), ChannelError> {
+        // Send response back to the user
+        unimplemented!()
+    }
+    
+    async fn health_check(&self) -> Result<(), ChannelError> {
+        // Check if the channel is healthy
+        Ok(())
+    }
+}
+
+// Register the channel
+let manager = ChannelManager::new();
+manager.add(Box::new(MyChannel)).await;
+```

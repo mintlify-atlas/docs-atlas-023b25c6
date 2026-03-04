@@ -1,0 +1,477 @@
+---
+title: 'Workspace & Memory'
+description: 'Persistent filesystem-like memory with hybrid search'
+icon: 'folder-tree'
+---
+
+The workspace provides persistent memory for agents with a flexible filesystem-like structure. Agents can create arbitrary markdown file hierarchies that get indexed for full-text and semantic search.
+
+## Architecture
+
+```text
+workspace/
+├── README.md              <- Root runbook/index
+├── MEMORY.md              <- Long-term curated memory
+├── HEARTBEAT.md           <- Periodic checklist
+├── context/               <- Identity and context
+│   ├── vision.md
+│   └── priorities.md
+├── daily/                 <- Daily logs
+│   ├── 2024-01-15.md
+│   └── 2024-01-16.md
+├── projects/              <- Arbitrary structure
+│   └── alpha/
+│       ├── README.md
+│       └── notes.md
+└── ...
+```
+
+## Core Principles
+
+<CardGroup cols={2}>
+  <Card title="Memory is Persistence" icon="floppy-disk">
+    If you want to remember something, write it to a file
+  </Card>
+  <Card title="Flexible Structure" icon="sitemap">
+    Create any directory/file hierarchy you need
+  </Card>
+  <Card title="Self-Documenting" icon="book">
+    Use README.md files to describe directory structure
+  </Card>
+  <Card title="Hybrid Search" icon="magnifying-glass">
+    Vector similarity + BM25 full-text via RRF
+  </Card>
+</CardGroup>
+
+## Key Operations
+
+### Reading Files
+
+```rust
+// Read a file by path
+let doc = workspace.read("context/vision.md").await?;
+println!("{}", doc.content);
+
+// Check if file exists
+if workspace.exists("MEMORY.md").await? {
+    println!("Memory file found");
+}
+```
+
+### Writing Files
+
+```rust
+// Create or update a file
+workspace.write(
+    "projects/alpha/README.md",
+    "# Project Alpha\n\nDescription here."
+).await?;
+
+// Append to a file
+workspace.append(
+    "daily/2024-01-15.md",
+    "[14:30] Completed feature X"
+).await?;
+```
+
+### Directory Operations
+
+```rust
+// List files in directory
+let entries = workspace.list("projects/").await?;
+for entry in entries {
+    if entry.is_directory {
+        println!("📁 {}/", entry.name());
+    } else {
+        println!("📄 {}", entry.name());
+    }
+}
+
+// List all files recursively
+let all_paths = workspace.list_all().await?;
+```
+
+### Memory Operations
+
+```rust
+// Append to MEMORY.md
+workspace.append_memory(
+    "User prefers TypeScript for web projects"
+).await?;
+
+// Append to today's daily log
+workspace.append_daily_log(
+    "Reviewed PR #42, approved"
+).await?;
+
+// Get today's daily log
+let today = workspace.today_log().await?;
+```
+
+## Identity Files
+
+The workspace includes special files that shape the agent's behavior:
+
+### MEMORY.md
+
+Long-term curated notes loaded into the system prompt:
+
+```markdown
+# Memory
+
+## User Preferences
+
+- Prefers concise responses without filler
+- Works in US/Pacific timezone
+- Uses VS Code with Vim keybindings
+
+## Important Context
+
+- Main project: IronClaw (Rust + TypeScript)
+- Deploy via GitHub Actions to Fly.io
+- PostgreSQL database at db.example.com
+```
+
+<Info>
+Keep MEMORY.md concise—it's loaded on every session. Use daily logs for detailed session notes.
+</Info>
+
+### IDENTITY.md
+
+Agent name, vibe, and personality:
+
+```markdown
+# Identity
+
+- **Name:** Ada
+- **Vibe:** Direct, resourceful, low-filler
+- **Emoji:** 🦀
+
+I prefer action over asking. If I can do it safely (read a file, search memory), I do it.
+```
+
+### SOUL.md
+
+Core values and behavioral boundaries:
+
+```markdown
+# Core Values
+
+Be genuinely helpful, not performatively helpful. Skip filler phrases.
+Have opinions. Disagree when it matters.
+Be resourceful before asking: read the file, check context, search, then ask.
+
+## Boundaries
+
+- Private things stay private. Never leak user context into group chats.
+- When in doubt about an external action, ask before acting.
+- Prefer reversible actions over destructive ones.
+```
+
+### AGENTS.md
+
+Session routine and operational instructions:
+
+```markdown
+# Agent Instructions
+
+## Every Session
+
+1. Read SOUL.md (who you are)
+2. Read USER.md (who you're helping)
+3. Read today's daily log for recent context
+
+## Memory
+
+You wake up fresh each session. Workspace files are your continuity.
+- Daily logs: raw session notes
+- MEMORY.md: curated long-term knowledge
+
+Write things down. Mental notes do not survive restarts.
+```
+
+### USER.md
+
+Information about the user:
+
+```markdown
+# User Context
+
+- **Name:** Alice
+- **Timezone:** US/Pacific
+- **Preferences:**
+  - Morning person (productive 6am-12pm)
+  - No notifications during focus blocks
+  - Async communication preferred
+```
+
+### HEARTBEAT.md
+
+Periodic background task checklist:
+
+```markdown
+# Heartbeat Checklist
+
+Rotate through these checks 2-4 times per day:
+- [ ] Check for urgent messages
+- [ ] Review upcoming calendar events
+- [ ] Check project status or CI builds
+
+Stay quiet during 23:00-08:00 user-local time unless urgent.
+If nothing needs attention, reply HEARTBEAT_OK.
+```
+
+<Warning>
+Keep HEARTBEAT.md empty to disable periodic checks and save API costs.
+</Warning>
+
+### TOOLS.md
+
+Environment-specific tool notes (guidance, not enforcement):
+
+```markdown
+# Tool Notes
+
+- SSH hosts: dev-box (Ubuntu 22.04, username: alice)
+- Camera: Canon R6 mounted at /Volumes/EOS_R
+- Default shell on remote: bash, no zsh
+```
+
+## System Prompt Generation
+
+The workspace builds the agent's system prompt from identity files:
+
+```rust
+let prompt = workspace.system_prompt().await?;
+
+// Includes (in order):
+// 1. BOOTSTRAP.md (first-run only)
+// 2. AGENTS.md
+// 3. SOUL.md
+// 4. USER.md
+// 5. IDENTITY.md
+// 6. TOOLS.md
+// 7. MEMORY.md (excluded in group chats)
+// 8. Today's daily log
+// 9. Yesterday's daily log
+```
+
+### Group Chat Safety
+
+```rust
+// Exclude MEMORY.md in group contexts
+let prompt = workspace.system_prompt_for_context(
+    is_group_chat = true
+).await?;
+
+// Prevents leaking private context into shared conversations
+```
+
+## Hybrid Search
+
+Combines full-text (BM25) and semantic (vector) search using Reciprocal Rank Fusion:
+
+### Search Formula
+
+```
+RRF score = sum(1 / (k + rank)) for each retrieval method
+
+Where:
+- k = 60 (typical constant)
+- rank = position in results (1-based)
+```
+
+### Example
+
+```rust
+use ironclaw::workspace::SearchConfig;
+
+// Search with defaults
+let results = workspace.search(
+    "deployment process",
+    limit: 10
+).await?;
+
+for result in results {
+    println!("{}: {} (score: {:.3})",
+        result.document_path,
+        &result.content[..100],
+        result.score
+    );
+}
+
+// Custom configuration
+let results = workspace.search_with_config(
+    "authentication flow",
+    SearchConfig::default()
+        .with_limit(20)
+        .with_min_score(0.5)
+        .fts_only()  // Disable vector search
+).await?;
+```
+
+### Search Result
+
+```rust
+pub struct SearchResult {
+    pub document_id: Uuid,
+    pub document_path: String,
+    pub chunk_id: Uuid,
+    pub content: String,
+    pub score: f32,
+    pub fts_rank: Option<u32>,
+    pub vector_rank: Option<u32>,
+}
+
+// Check result source
+if result.is_hybrid() {
+    println!("Found in both FTS and vector search");
+} else if result.from_fts() {
+    println!("Found via full-text search");
+} else if result.from_vector() {
+    println!("Found via semantic search");
+}
+```
+
+## Embedding Providers
+
+Semantic search requires an embedding provider:
+
+### OpenAI
+
+```bash
+export EMBEDDING_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
+```
+
+### Ollama (Local)
+
+```bash
+export EMBEDDING_PROVIDER=ollama
+export OLLAMA_BASE_URL=http://localhost:11434
+export OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+```
+
+### NEAR AI
+
+```bash
+export EMBEDDING_PROVIDER=near
+export NEAR_EMBEDDING_API_KEY=...
+```
+
+### Mock (Testing)
+
+```bash
+export EMBEDDING_PROVIDER=mock
+# Returns random vectors for testing
+```
+
+## Document Chunking
+
+Files are automatically chunked for indexing:
+
+```rust
+use ironclaw::workspace::{chunk_document, ChunkConfig};
+
+let chunks = chunk_document(
+    &content,
+    ChunkConfig {
+        chunk_size: 1000,
+        chunk_overlap: 200,
+        ..Default::default()
+    }
+);
+
+// Each chunk is indexed separately for search
+```
+
+## Database Backends
+
+The workspace supports multiple database backends:
+
+### PostgreSQL
+
+```bash
+export DATABASE_URL=postgresql://user:pass@localhost/ironclaw
+```
+
+Requires:
+- `pgvector` extension for vector search
+- Full-text search via `ts_vector`
+
+### libSQL (SQLite-compatible)
+
+```bash
+export DATABASE_URL=file:~/.ironclaw/ironclaw.db
+```
+
+Local-first with optional sync to Turso.
+
+## Workspace API
+
+```rust
+use ironclaw::workspace::Workspace;
+use ironclaw::workspace::embeddings::OpenAiEmbeddings;
+
+// Create workspace
+let workspace = Workspace::new_with_db("user_id", db)
+    .with_embeddings(Arc::new(OpenAiEmbeddings::new(api_key)?));
+
+// Seed identity files on first run
+workspace.seed_if_empty().await?;
+
+// Import custom templates from disk
+workspace.import_from_directory(Path::new("/path/to/templates")).await?;
+
+// Backfill embeddings after enabling provider
+let count = workspace.backfill_embeddings().await?;
+println!("Generated {} embeddings", count);
+```
+
+## Protected Files
+
+Some files are read-only from tools to prevent prompt injection:
+
+```rust
+const PROTECTED_PATHS: &[&str] = &[
+    "SOUL.md",
+    "IDENTITY.md",
+    "USER.md",
+    "AGENTS.md",
+];
+
+// Tools cannot write to these files
+// User must edit them directly
+```
+
+<Warning>
+BOOTSTRAP.md is intentionally NOT protected so the agent can delete it after first-run onboarding.
+</Warning>
+
+## Memory Hygiene
+
+The workspace includes utilities for maintaining clean memory:
+
+```rust
+use ironclaw::workspace::hygiene;
+
+// Detect stale daily logs
+let stale = hygiene::find_stale_logs(&workspace, 90).await?;
+
+// Detect duplicate memory entries
+let dupes = hygiene::find_duplicates(&workspace).await?;
+
+// Suggest consolidation
+let suggestions = hygiene::suggest_consolidation(&workspace).await?;
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Routines" icon="clock" href="/features/routines">
+    Automate periodic tasks with routines
+  </Card>
+  <Card title="Search API" icon="magnifying-glass" href="/api/workspace">
+    API reference for hybrid search
+  </Card>
+</CardGroup>

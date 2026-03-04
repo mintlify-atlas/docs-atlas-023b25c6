@@ -1,0 +1,439 @@
+---
+title: 'ironclaw mcp'
+description: 'Manage MCP servers (add, auth, list, test)'
+icon: 'server'
+---
+
+## Overview
+
+The `ironclaw mcp` command manages Model Context Protocol (MCP) servers. MCP servers are hosted tool providers that expose capabilities through a standardized API.
+
+<Info>
+  MCP allows you to connect to external services like Notion, GitHub, Slack, and more without installing separate tools.
+</Info>
+
+## Subcommands
+
+### add
+
+Add a new MCP server:
+
+```bash
+ironclaw mcp add <NAME> <URL> [OPTIONS]
+```
+
+<ParamField path="name" type="string" required>
+  Server name (e.g., "notion", "github").
+</ParamField>
+
+<ParamField path="url" type="string" required>
+  Server URL (e.g., "https://mcp.notion.com").
+</ParamField>
+
+<ParamField path="--client-id" type="string">
+  OAuth client ID if authentication is required.
+</ParamField>
+
+<ParamField path="--auth-url" type="string">
+  OAuth authorization URL (optional, can be discovered).
+</ParamField>
+
+<ParamField path="--token-url" type="string">
+  OAuth token URL (optional, can be discovered).
+</ParamField>
+
+<ParamField path="--scopes" type="string">
+  Comma-separated list of OAuth scopes to request.
+</ParamField>
+
+<ParamField path="--description" type="string">
+  Server description.
+</ParamField>
+
+**Examples:**
+
+```bash
+# Add a server without authentication
+ironclaw mcp add weather https://mcp.weather.example.com
+
+# Add a server with OAuth
+ironclaw mcp add notion https://mcp.notion.com \
+  --client-id abc123 \
+  --scopes "read:pages,write:pages" \
+  --description "Notion workspace integration"
+
+# Add with explicit OAuth endpoints
+ironclaw mcp add github https://mcp.github.com \
+  --client-id xyz789 \
+  --auth-url https://github.com/login/oauth/authorize \
+  --token-url https://github.com/login/oauth/access_token \
+  --scopes "repo,read:user"
+```
+
+**Output:**
+
+```bash
+  ✓ Added MCP server 'notion'
+    URL: https://mcp.notion.com
+
+  Run 'ironclaw mcp auth notion' to authenticate.
+```
+
+### remove
+
+Remove an MCP server:
+
+```bash
+ironclaw mcp remove <NAME>
+```
+
+<ParamField path="name" type="string" required>
+  Server name to remove.
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw mcp remove notion
+```
+
+**Output:**
+
+```bash
+  ✓ Removed MCP server 'notion'
+```
+
+### list
+
+List configured MCP servers:
+
+```bash
+ironclaw mcp list [OPTIONS]
+```
+
+<ParamField path="-v, --verbose" type="flag">
+  Show detailed information including OAuth configuration.
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw mcp list
+ironclaw mcp list --verbose
+```
+
+**Output (normal):**
+
+```bash
+  Configured MCP servers:
+
+  ● notion - https://mcp.notion.com (auth required)
+  ● github - https://mcp.github.com (auth required)
+  ○ weather - https://mcp.weather.example.com
+
+  Use --verbose for more details.
+```
+
+**Legend:**
+- `●` - Enabled server
+- `○` - Disabled server
+
+**Output (verbose):**
+
+```bash
+  Configured MCP servers:
+
+  ● notion (auth required)
+      URL: https://mcp.notion.com
+      Description: Notion workspace integration
+      OAuth Client ID: abc123
+      Scopes: read:pages, write:pages
+
+  ● github (auth required)
+      URL: https://mcp.github.com
+      OAuth Client ID: xyz789
+      Scopes: repo, read:user
+
+  ○ weather
+      URL: https://mcp.weather.example.com
+```
+
+### auth
+
+Authenticate with an MCP server using OAuth:
+
+```bash
+ironclaw mcp auth <NAME> [OPTIONS]
+```
+
+<ParamField path="name" type="string" required>
+  Server name to authenticate.
+</ParamField>
+
+<ParamField path="-u, --user" type="string" default="default">
+  User ID for storing the token.
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw mcp auth notion
+```
+
+**OAuth Flow:**
+
+```bash
+╔════════════════════════════════════════════════════════════════╗
+║                     NOTION Authentication                      ║
+╚════════════════════════════════════════════════════════════════╝
+
+  Starting OAuth authentication...
+
+  Opening browser for Notion login...
+
+  Waiting for authorization...
+
+  Exchanging code for token...
+
+  ✓ Successfully authenticated with 'notion'!
+
+  You can now use tools from this server.
+```
+
+**Dynamic Client Registration (DCR):**
+
+If you add a server without `--client-id`, IronClaw will attempt Dynamic Client Registration:
+
+```bash
+ironclaw mcp add notion https://mcp.notion.com
+ironclaw mcp auth notion
+```
+
+```bash
+╔════════════════════════════════════════════════════════════════╗
+║                     NOTION Authentication                      ║
+╚════════════════════════════════════════════════════════════════╝
+
+  No OAuth configuration found, attempting Dynamic Client Registration...
+
+  ✓ Client registered with Notion!
+
+  Opening browser for login...
+
+  ✓ Successfully authenticated with 'notion'!
+```
+
+<Note>
+  Not all MCP servers support Dynamic Client Registration. If DCR fails, you'll need to register your application manually and add the server with `--client-id`.
+</Note>
+
+### test
+
+Test connection to an MCP server and list available tools:
+
+```bash
+ironclaw mcp test <NAME> [OPTIONS]
+```
+
+<ParamField path="name" type="string" required>
+  Server name to test.
+</ParamField>
+
+<ParamField path="-u, --user" type="string" default="default">
+  User ID for authentication.
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw mcp test notion
+```
+
+**Output (success):**
+
+```bash
+  Testing connection to 'notion'...
+  ✓ Connection successful!
+
+  Available tools (8):
+    • notion_search [approval required]
+      Search pages and databases in your Notion workspace
+    • notion_create_page
+      Create a new page in a database
+    • notion_update_page
+      Update properties of an existing page
+    • notion_get_page
+      Retrieve a page by ID
+    • notion_list_databases
+      List all databases in the workspace
+    • notion_query_database [approval required]
+      Query a database with filters and sorting
+    • notion_create_database
+      Create a new database
+    • notion_get_user
+      Get information about a user
+```
+
+**Output (authentication required):**
+
+```bash
+  Testing connection to 'notion'...
+  ✗ Not authenticated. Run 'ironclaw mcp auth notion' first.
+```
+
+**Output (connection failed):**
+
+```bash
+  Testing connection to 'notion'...
+  ✗ Connection failed: Connection refused (ECONNREFUSED)
+```
+
+### toggle
+
+Enable or disable an MCP server:
+
+```bash
+ironclaw mcp toggle <NAME> [OPTIONS]
+```
+
+<ParamField path="name" type="string" required>
+  Server name.
+</ParamField>
+
+<ParamField path="--enable" type="flag">
+  Enable the server.
+</ParamField>
+
+<ParamField path="--disable" type="flag">
+  Disable the server.
+</ParamField>
+
+<Note>
+  If neither `--enable` nor `--disable` is specified, the server state will be toggled.
+</Note>
+
+**Examples:**
+
+```bash
+# Enable a server
+ironclaw mcp toggle notion --enable
+
+# Disable a server
+ironclaw mcp toggle github --disable
+
+# Toggle state
+ironclaw mcp toggle weather
+```
+
+**Output:**
+
+```bash
+  ✓ Server 'notion' is now enabled.
+```
+
+## Common MCP Servers
+
+Popular MCP servers you can connect to:
+
+### Notion
+
+```bash
+ironclaw mcp add notion https://mcp.notion.com
+ironclaw mcp auth notion
+```
+
+**Tools:** Search pages, create/update pages, query databases, manage workspaces.
+
+### GitHub
+
+```bash
+ironclaw mcp add github https://mcp.github.com \
+  --scopes "repo,read:user,write:issues"
+ironclaw mcp auth github
+```
+
+**Tools:** Create issues, manage PRs, search repositories, update files.
+
+### Slack
+
+```bash
+ironclaw mcp add slack https://mcp.slack.com \
+  --scopes "chat:write,channels:read,users:read"
+ironclaw mcp auth slack
+```
+
+**Tools:** Send messages, list channels, manage conversations.
+
+### Google Drive
+
+```bash
+ironclaw mcp add gdrive https://mcp.google.com/drive \
+  --scopes "https://www.googleapis.com/auth/drive.readonly"
+ironclaw mcp auth gdrive
+```
+
+**Tools:** Search files, read documents, list folders.
+
+## Configuration Storage
+
+MCP server configurations are stored in:
+
+- **Database:** If connected, stored in the `mcp_servers` table
+- **Disk fallback:** `~/.ironclaw/mcp_servers.json`
+
+Authentication tokens are stored securely in the secrets store (encrypted with your master key).
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Authentication fails">
+    If OAuth authentication fails:
+    
+    1. Verify the server URL is correct
+    2. Check that your `client_id` is valid
+    3. Ensure you have the required scopes
+    4. Try re-authenticating: `ironclaw mcp auth <name>`
+    5. Check server logs for errors
+  </Accordion>
+  
+  <Accordion title="Connection timeout">
+    If `ironclaw mcp test` times out:
+    
+    1. Check your internet connection
+    2. Verify the server URL is accessible
+    3. Check firewall rules
+    4. Try disabling VPN if applicable
+  </Accordion>
+  
+  <Accordion title="Tools not appearing">
+    If tools don't show up after connecting:
+    
+    1. Verify authentication: `ironclaw mcp test <name>`
+    2. Check server is enabled: `ironclaw mcp list`
+    3. Restart the agent: `ironclaw run`
+    4. Check agent logs for errors
+  </Accordion>
+  
+  <Accordion title="Dynamic Client Registration fails">
+    If DCR fails:
+    
+    1. The server may not support DCR
+    2. Register your application manually on the provider's website
+    3. Add the server with `--client-id`:
+       ```bash
+       ironclaw mcp add notion https://mcp.notion.com --client-id YOUR_CLIENT_ID
+       ```
+  </Accordion>
+</AccordionGroup>
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw tool" icon="wrench" href="/cli/tool">
+    Manage WASM tools
+  </Card>
+  
+  <Card title="ironclaw status" icon="heart" href="/cli/status">
+    View MCP server count
+  </Card>
+</CardGroup>

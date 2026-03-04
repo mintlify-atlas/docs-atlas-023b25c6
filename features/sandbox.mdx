@@ -1,0 +1,524 @@
+---
+title: 'Docker Sandbox'
+description: 'Isolated job execution in Docker containers with resource limits'
+icon: 'docker'
+---
+
+IronClaw provides a Docker-based sandbox for executing long-running jobs in isolated containers. Each job runs in its own environment with strict resource limits, credential injection, and real-time event streaming.
+
+## Architecture
+
+```text
+┌───────────────────────────────────────────────┐
+│              Orchestrator                       │
+│                                                 │
+│  Internal API (default :50051, configurable)    │
+│    POST /worker/{id}/llm/complete               │
+│    POST /worker/{id}/llm/complete_with_tools    │
+│    GET  /worker/{id}/job                        │
+│    GET  /worker/{id}/credentials                │
+│    POST /worker/{id}/status                     │
+│    POST /worker/{id}/complete                   │
+│                                                 │
+│  ContainerJobManager                            │
+│    create_job() -> container + token             │
+│    stop_job()                                    │
+│    list_jobs()                                   │
+│                                                 │
+│  TokenStore                                     │
+│    per-job bearer tokens (in-memory only)       │
+│    per-job credential grants (in-memory only)   │
+└───────────────────────────────────────────────┘
+```
+
+## Job Modes
+
+<CardGroup cols={2}>
+  <Card title="Worker" icon="robot">
+    Standard IronClaw agent with proxied LLM calls through the orchestrator
+  </Card>
+  <Card title="Claude Code" icon="code">
+    Spawns the official `claude` CLI directly for Claude Code workflows
+  </Card>
+</CardGroup>
+
+## Creating Jobs
+
+### Via Tool
+
+```rust
+{
+  "tool": "job_create",
+  "title": "Refactor authentication module",
+  "description": "Extract auth logic into a separate crate, add tests",
+  "mode": "worker",
+  "project_dir": "~/.ironclaw/projects/myapp",
+  "credential_grants": [
+    {
+      "env_var": "GITHUB_TOKEN",
+      "source": "github_pat"
+    }
+  ]
+}
+```
+
+### Via CLI
+
+```bash
+# Create a worker job
+ironclaw job create \
+  --title "Deploy to staging" \
+  --description "Pull latest, run tests, deploy" \
+  --mode worker \
+  --project ~/.ironclaw/projects/myapp
+
+# Create a Claude Code job
+ironclaw job create \
+  --mode claude-code \
+  --title "Add OAuth flow" \
+  --description "Implement OAuth 2.0 authorization code flow"
+
+# List jobs
+ironclaw job list
+
+# Stop a job
+ironclaw job stop <job-id>
+
+# View logs
+ironclaw job logs <job-id>
+```
+
+## Worker Mode
+
+Runs the IronClaw agent inside a container with LLM calls proxied through the orchestrator:
+
+### Container Configuration
+
+```rust
+ContainerJobConfig {
+    image: "ironclaw-worker:latest",
+    memory_limit_mb: 2048,
+    cpu_shares: 1024,
+    orchestrator_port: 50051,
+}
+```
+
+### Security Constraints
+
+- **No network access** (except orchestrator API)
+- **Read-only filesystem** (except /tmp and project dir)
+- **CPU throttling** via cgroup shares
+- **Memory limits** enforced by Docker
+- **No privileged operations**
+- **Credentials injected** via env vars, never in image
+
+### Execution Flow
+
+1. **Orchestrator creates container**
+   - Generates unique bearer token
+   - Stores credential grants
+   - Starts container with orchestrator URL
+
+2. **Worker fetches job description**
+   ```http
+   GET /worker/{id}/job
+   Authorization: Bearer <token>
+   ```
+
+3. **Worker fetches credentials**
+   ```http
+   GET /worker/{id}/credentials
+   Authorization: Bearer <token>
+   ```
+
+4. **Worker runs agent loop**
+   - LLM calls proxied through orchestrator
+   - Tool execution within container
+   - Real-time events streamed
+
+5. **Worker reports completion**
+   ```http
+   POST /worker/{id}/complete
+   {
+     "success": true,
+     "message": "Refactoring complete",
+     "iterations": 8
+   }
+   ```
+
+### LLM Proxy
+
+The worker uses `ProxyLlmProvider` to forward requests:
+
+```rust
+impl LlmProvider for ProxyLlmProvider {
+    async fn complete(
+        &self,
+        messages: &[ChatMessage],
+    ) -> Result<String, LlmError> {
+        let resp = self.client
+            .post("/llm/complete")
+            .bearer_auth(&self.token)
+            .json(&CompletionRequest { messages })
+            .send()
+            .await?;
+        
+        Ok(resp.text().await?)
+    }
+
+    async fn complete_with_tools(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolDefinition],
+    ) -> Result<RespondResult, LlmError> {
+        // Similar proxy call
+    }
+}
+```
+
+### Project Directory Binding
+
+Optionally bind a host directory into the container:
+
+```bash
+# Project directory validation
+# Must be under ~/.ironclaw/projects/
+~/.ironclaw/projects/myapp -> /workspace (inside container)
+```
+
+Validation prevents path traversal:
+
+```rust
+fn validate_bind_mount_path(
+    dir: &Path,
+    job_id: Uuid,
+) -> Result<PathBuf, OrchestratorError> {
+    let canonical = dir.canonicalize()?;
+    let base = ironclaw_base_dir().join("projects").canonicalize()?;
+    
+    if !canonical.starts_with(&base) {
+        return Err(OrchestratorError::ContainerCreationFailed {
+            job_id,
+            reason: format!(
+                "Project dir {} is outside allowed base {}",
+                canonical.display(),
+                base.display()
+            ),
+        });
+    }
+    
+    Ok(canonical)
+}
+```
+
+## Claude Code Mode
+
+Spawns the official Anthropic `claude` CLI for Claude Code workflows:
+
+### Configuration
+
+```bash
+# API key (takes priority)
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Or OAuth token from local session
+export CLAUDE_CODE_OAUTH_TOKEN=$(cat ~/.claude/oauth_token)
+
+# Model selection
+export CLAUDE_CODE_MODEL=sonnet  # sonnet, opus, haiku
+
+# Resource limits
+export CLAUDE_CODE_MEMORY_LIMIT_MB=4096
+export CLAUDE_CODE_MAX_TURNS=50
+
+# Tool allowlist
+export CLAUDE_CODE_ALLOWED_TOOLS="bash,cat,file_operations,memory"
+```
+
+### Container Setup
+
+```dockerfile
+FROM ubuntu:22.04
+
+# Install Claude CLI
+RUN curl -fsSL https://claude.ai/cli/install.sh | bash
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    git curl wget jq python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+ENTRYPOINT ["/usr/local/bin/claude"]
+```
+
+### Execution
+
+```bash
+# Inside container
+claude \
+  --model sonnet \
+  --max-turns 50 \
+  --allowed-tools bash,file_operations \
+  "$(cat /tmp/task_description.txt)"
+```
+
+### Features
+
+- **Full Claude Code experience** inside sandbox
+- **Tool filtering** via allowlist
+- **OAuth or API key auth**
+- **Real-time streaming** to UI
+- **Project directory binding** for code access
+
+## Credential Injection
+
+Credentials are injected at runtime, never baked into images:
+
+### Grant Definition
+
+```rust
+pub struct CredentialGrant {
+    /// Environment variable name (e.g. "GITHUB_TOKEN")
+    pub env_var: String,
+    /// Source credential ID from secrets store
+    pub source: String,
+}
+```
+
+### Injection Flow
+
+1. **Job creation**: Grants stored in TokenStore
+2. **Worker startup**: Fetches credentials via `/credentials` endpoint
+3. **Tool execution**: Credentials injected into child processes via `Command::envs()`
+
+```rust
+// Never use std::env::set_var (unsafe in multi-threaded runtime)
+// Instead, inject per-command:
+let mut cmd = Command::new("git");
+cmd.arg("push");
+cmd.envs(self.extra_env.as_ref());  // Inject credentials
+let output = cmd.output().await?;
+```
+
+### Security Properties
+
+- **Never logged** (redacted from debug output)
+- **Never persisted** (in-memory only)
+- **Scoped to job** (revoked on completion)
+- **Process-isolated** (not in global env)
+
+## Real-Time Events
+
+Jobs stream events to the orchestrator for UI visibility:
+
+### Event Types
+
+```typescript
+type JobEvent =
+  | { type: 'message'; role: 'assistant'; content: string }
+  | { type: 'tool_use'; tool: string; input: object }
+  | { type: 'tool_result'; tool: string; output: string; success: boolean }
+  | { type: 'result'; success: boolean; message: string }
+  | { type: 'status'; state: string; iteration: number }
+```
+
+### Streaming API
+
+```http
+GET /api/jobs/{id}/events
+Authorization: Bearer <auth-token>
+
+# SSE stream
+event: message
+data: {"role":"assistant","content":"Starting deployment..."}
+
+event: tool_use
+data: {"tool":"shell","input":{"command":"git pull"}}
+
+event: tool_result
+data: {"tool":"shell","output":"Already up to date","success":true}
+
+event: result
+data: {"success":true,"message":"Deployment complete"}
+```
+
+## Resource Limits
+
+### Memory
+
+```rust
+// Worker mode
+memory_limit_mb: 2048
+
+// Claude Code mode (heavier)
+memory_limit_mb: 4096
+```
+
+Enforced via Docker `--memory` flag.
+
+### CPU
+
+```rust
+cpu_shares: 1024  // Default Docker weight
+```
+
+Throttles CPU usage but doesn't hard-cap.
+
+### Timeout
+
+```rust
+timeout: Duration::from_secs(600)  // 10 minutes default
+```
+
+Jobs are killed if they exceed timeout.
+
+### Concurrent Jobs
+
+```bash
+export JOB_MAX_CONCURRENT=5
+```
+
+Global limit across all users.
+
+## Container Lifecycle
+
+### Creation
+
+```rust
+let job_id = Uuid::new_v4();
+let token = job_manager.create_job(
+    job_id,
+    "Deploy to staging",
+    Some(PathBuf::from("~/.ironclaw/projects/myapp")),
+    JobMode::Worker,
+    vec![CredentialGrant {
+        env_var: "GITHUB_TOKEN".to_string(),
+        source: "github_pat".to_string(),
+    }],
+).await?;
+```
+
+### Monitoring
+
+```rust
+let handle = job_manager.get_job(job_id).await?;
+print_status(&handle);
+```
+
+### Cleanup
+
+```rust
+// Graceful stop
+job_manager.stop_job(job_id).await?;
+
+// Force kill after grace period
+job_manager.kill_job(job_id).await?;
+```
+
+Containers are automatically removed after 1 hour of inactivity.
+
+## Docker API
+
+Uses [bollard](https://github.com/fussybeaver/bollard) for Docker interaction:
+
+```rust
+use bollard::Docker;
+use bollard::container::{CreateContainerOptions, Config};
+
+let docker = Docker::connect_with_socket_defaults()?;
+
+let container = docker.create_container(
+    Some(CreateContainerOptions {
+        name: format!("ironclaw-job-{}", job_id),
+        ..Default::default()
+    }),
+    Config {
+        image: Some("ironclaw-worker:latest"),
+        env: Some(vec![
+            format!("IRONCLAW_JOB_ID={}", job_id),
+            format!("IRONCLAW_WORKER_TOKEN={}", token),
+            format!("ORCHESTRATOR_URL=http://host.docker.internal:50051"),
+        ]),
+        host_config: Some(HostConfig {
+            memory: Some(2048 * 1024 * 1024),
+            cpu_shares: Some(1024),
+            binds: Some(vec![
+                format!("{}:/workspace", project_dir.display()),
+            ]),
+            ..Default::default()
+        }),
+        ..Default::default()
+    },
+).await?;
+
+docker.start_container(&container.id, None).await?;
+```
+
+## Building Images
+
+### Worker Image
+
+```dockerfile
+FROM rust:1.75-slim
+
+WORKDIR /app
+
+# Copy IronClaw binary
+COPY target/release/ironclaw /usr/local/bin/
+
+# Container-safe tools only
+RUN apt-get update && apt-get install -y \
+    git curl wget jq \
+    && rm -rf /var/lib/apt/lists/*
+
+ENTRYPOINT ["ironclaw", "worker"]
+```
+
+### Building
+
+```bash
+# Build worker image
+docker build -f Dockerfile.worker -t ironclaw-worker:latest .
+
+# Test locally
+docker run --rm \
+  -e IRONCLAW_JOB_ID=test \
+  -e IRONCLAW_WORKER_TOKEN=test \
+  -e ORCHESTRATOR_URL=http://host.docker.internal:50051 \
+  ironclaw-worker:latest
+```
+
+## Security Considerations
+
+<AccordionGroup>
+  <Accordion title="Network Isolation">
+    Containers have no internet access except the orchestrator API. Use credential injection for external API calls through the host.
+  </Accordion>
+
+  <Accordion title="Filesystem Sandboxing">
+    Root filesystem is read-only. Only `/tmp` and the project directory (if bound) are writable.
+  </Accordion>
+
+  <Accordion title="Privilege Dropping">
+    Containers run as non-root user. No `--privileged` flag, no capabilities.
+  </Accordion>
+
+  <Accordion title="Token Security">
+    Per-job bearer tokens are generated randomly and stored in-memory only. Tokens are revoked on job completion.
+  </Accordion>
+
+  <Accordion title="Credential Leakage">
+    Credentials are redacted from logs and never persisted to disk. Leak detector scans all outputs.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Channels" icon="tower-broadcast" href="/features/channels">
+    Learn about multi-channel support
+  </Card>
+  <Card title="Configuration" icon="gear" href="/configuration/environment-variables">
+    Configure sandbox settings
+  </Card>
+</CardGroup>

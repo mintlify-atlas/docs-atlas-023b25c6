@@ -1,0 +1,270 @@
+---
+title: 'ironclaw config'
+description: 'Manage configuration settings'
+icon: 'gear'
+---
+
+## Overview
+
+The `ironclaw config` command provides subcommands for viewing and modifying IronClaw settings. Settings are stored in the database with fallback to disk, following the precedence: environment variables > config.toml > database > defaults.
+
+## Subcommands
+
+### init
+
+Generate a default `config.toml` file:
+
+```bash
+ironclaw config init [OPTIONS]
+```
+
+<ParamField path="-o, --output" type="path">
+  Output path for the config file. Defaults to `~/.ironclaw/config.toml`.
+</ParamField>
+
+<ParamField path="--force" type="flag">
+  Overwrite existing config file if it exists.
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw config init
+ironclaw config init --output ./config.toml --force
+```
+
+### list
+
+List all settings and their current values:
+
+```bash
+ironclaw config list [OPTIONS]
+```
+
+<ParamField path="-f, --filter" type="string">
+  Show only settings matching this prefix (e.g., "agent", "heartbeat", "embeddings").
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw config list
+ironclaw config list --filter agent
+```
+
+**Output:**
+
+```bash
+Settings (source: database):
+
+  agent.name                    ironclaw
+  agent.max_parallel_jobs       5
+  agent.max_iterations          50
+  heartbeat.enabled             true
+  heartbeat.interval_secs       300
+  embeddings.enabled            false
+  embeddings.provider           openai
+  embeddings.model              text-embedding-3-small
+```
+
+### get
+
+Get the value of a specific setting:
+
+```bash
+ironclaw config get <PATH>
+```
+
+<ParamField path="path" type="string" required>
+  Setting path using dot notation (e.g., "agent.max_parallel_jobs").
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw config get agent.name
+# Output: ironclaw
+
+ironclaw config get heartbeat.interval_secs
+# Output: 300
+```
+
+### set
+
+Set a setting value:
+
+```bash
+ironclaw config set <PATH> <VALUE>
+```
+
+<ParamField path="path" type="string" required>
+  Setting path using dot notation (e.g., "agent.max_parallel_jobs").
+</ParamField>
+
+<ParamField path="value" type="string" required>
+  Value to set. Will be parsed as JSON if possible, otherwise stored as a string.
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw config set agent.name "my-agent"
+ironclaw config set agent.max_parallel_jobs 10
+ironclaw config set heartbeat.enabled true
+```
+
+**Output:**
+
+```bash
+Set agent.max_parallel_jobs = 10
+```
+
+<Warning>
+  Changes made with `set` require a restart of the agent to take effect.
+</Warning>
+
+### reset
+
+Reset a setting to its default value:
+
+```bash
+ironclaw config reset <PATH>
+```
+
+<ParamField path="path" type="string" required>
+  Setting path to reset (e.g., "agent.name").
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw config reset agent.name
+# Output: Reset agent.name to default: ironclaw
+```
+
+### path
+
+Show information about where settings are stored:
+
+```bash
+ironclaw config path
+```
+
+**Output:**
+
+```bash
+Settings stored in: database (settings table)
+Env config:         /home/user/.ironclaw/.env
+TOML config:        /home/user/.ironclaw/config.toml (not found)
+```
+
+## Available Settings
+
+Key settings you can configure:
+
+### Agent Settings
+
+- `agent.name` - Agent display name (default: "ironclaw")
+- `agent.max_parallel_jobs` - Maximum concurrent jobs (default: 5)
+- `agent.max_iterations` - Maximum iterations per agent loop (default: 50)
+- `agent.timeout_secs` - Job timeout in seconds (default: 300)
+
+### Heartbeat Settings
+
+- `heartbeat.enabled` - Enable periodic heartbeat loop (default: true)
+- `heartbeat.interval_secs` - Seconds between heartbeats (default: 300)
+
+### Embeddings Settings
+
+- `embeddings.enabled` - Enable semantic search (default: false)
+- `embeddings.provider` - Embeddings provider ("openai", "local") (default: "openai")
+- `embeddings.model` - Model to use (default: "text-embedding-3-small")
+- `embeddings.batch_size` - Batch size for indexing (default: 100)
+
+### Channel Settings
+
+- `channels.http_enabled` - Enable HTTP API (default: false)
+- `channels.http_port` - HTTP server port (default: 3000)
+
+### WASM Settings
+
+- `wasm.max_memory_mb` - Maximum memory per WASM instance (default: 512)
+- `wasm.max_execution_time_ms` - Execution timeout (default: 30000)
+
+## Configuration Precedence
+
+Settings are resolved in this order (highest to lowest priority):
+
+1. **Environment variables** - `AGENT_NAME`, `HEARTBEAT_ENABLED`, etc.
+2. **config.toml** - TOML configuration file
+3. **Database** - Settings stored in the database
+4. **Defaults** - Built-in default values
+
+## Examples
+
+### View all agent settings
+
+```bash
+ironclaw config list --filter agent
+```
+
+### Change agent name
+
+```bash
+ironclaw config set agent.name "production-agent"
+```
+
+### Enable heartbeat with custom interval
+
+```bash
+ironclaw config set heartbeat.enabled true
+ironclaw config set heartbeat.interval_secs 600
+```
+
+### Generate config file from current settings
+
+```bash
+ironclaw config init --force
+```
+
+This creates a `config.toml` file reflecting your current configuration, which you can then edit directly.
+
+## Editing config.toml
+
+You can also edit the TOML file directly:
+
+```toml
+[agent]
+name = "my-agent"
+max_parallel_jobs = 10
+max_iterations = 50
+
+[heartbeat]
+enabled = true
+interval_secs = 300
+
+[embeddings]
+enabled = true
+provider = "openai"
+model = "text-embedding-3-small"
+```
+
+<Note>
+  Changes to `config.toml` take effect when the agent restarts.
+</Note>
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw status" icon="heart" href="/cli/status">
+    View current configuration status
+  </Card>
+  
+  <Card title="ironclaw doctor" icon="stethoscope" href="/cli/doctor">
+    Validate configuration
+  </Card>
+  
+  <Card title="ironclaw onboard" icon="rocket" href="/cli/onboard">
+    Reconfigure with interactive wizard
+  </Card>
+</CardGroup>

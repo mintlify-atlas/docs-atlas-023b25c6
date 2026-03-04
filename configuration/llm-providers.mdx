@@ -1,0 +1,323 @@
+---
+title: "LLM Providers"
+description: "Configure inference providers for IronClaw"
+---
+
+## Overview
+
+IronClaw defaults to NEAR AI for model access, but supports any OpenAI-compatible endpoint as well as direct Anthropic, OpenAI, and Ollama integrations.
+
+## Supported Providers
+
+| Provider | Backend Value | API Key Required | Notes |
+|----------|---------------|------------------|-------|
+| NEAR AI | `nearai` | OAuth (browser) or API key | Default; multi-model access |
+| Anthropic | `anthropic` | `ANTHROPIC_API_KEY` | Claude models |
+| OpenAI | `openai` | `OPENAI_API_KEY` | GPT models |
+| Ollama | `ollama` | No | Local inference |
+| OpenRouter | `openai_compatible` | `LLM_API_KEY` | 300+ models via one API |
+| Together AI | `openai_compatible` | `LLM_API_KEY` | Fast open-source inference |
+| Fireworks AI | `openai_compatible` | `LLM_API_KEY` | Fast inference with compound AI |
+| vLLM / LiteLLM | `openai_compatible` | Optional | Self-hosted |
+| LM Studio | `openai_compatible` | No | Local GUI |
+
+## NEAR AI (Default)
+
+No additional configuration required. On first run, `ironclaw onboard` opens a browser for OAuth authentication.
+
+### Session Token Auth (Default)
+
+**Best for:** Local development, personal use
+
+```bash
+ironclaw onboard  # Opens browser for GitHub/Google login
+```
+
+Credentials are saved to `~/.ironclaw/session.json`.
+
+**Environment variables:**
+```bash
+NEARAI_MODEL=zai-org/GLM-latest
+NEARAI_BASE_URL=https://private.near.ai  # default
+NEARAI_AUTH_URL=https://private.near.ai  # default
+```
+
+### API Key Auth
+
+**Best for:** CI/CD, hosting providers, VPS without browser access
+
+```bash
+LLM_BACKEND=nearai
+NEARAI_API_KEY=your-api-key-from-cloud.near.ai
+NEARAI_MODEL=zai-org/GLM-latest
+```
+
+Get your API key from [cloud.near.ai](https://cloud.near.ai).
+
+**Automatic mode selection:** When `NEARAI_API_KEY` is set, IronClaw automatically uses the Chat Completions API at `cloud-api.near.ai` instead of session-based auth.
+
+### Popular Models
+
+| Model | ID |
+|-------|----|
+| GLM Latest (default) | `zai-org/GLM-latest` |
+| Claude Sonnet 4 | `anthropic::claude-sonnet-4-20250514` |
+| GPT-5.3 Codex | `openai::gpt-5.3-codex` |
+| GPT-5.2 | `openai::gpt-5.2` |
+| GPT-4o | `openai::gpt-4o` |
+
+## Anthropic (Claude)
+
+Direct access to Claude models via Anthropic API.
+
+```bash
+LLM_BACKEND=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-sonnet-4-20250514  # optional, see below
+```
+
+**Get your API key:** [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys)
+
+### Popular Models
+
+| Model | ID |
+|-------|----|
+| Claude Sonnet 4 | `claude-sonnet-4-20250514` |
+| Claude 3.5 Sonnet | `claude-3-5-sonnet-20241022` |
+| Claude 3.5 Haiku | `claude-3-5-haiku-20241022` |
+
+### Optional Base URL Override
+
+```bash
+ANTHROPIC_BASE_URL=https://api.anthropic.com  # custom proxy
+```
+
+## OpenAI (GPT)
+
+Direct access to OpenAI models.
+
+```bash
+LLM_BACKEND=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o  # optional, see below
+```
+
+**Get your API key:** [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+
+### Popular Models
+
+| Model | ID |
+|-------|----|
+| GPT-4o | `gpt-4o` |
+| GPT-4o Mini | `gpt-4o-mini` |
+| o3-mini | `o3-mini` |
+
+### Optional Base URL Override
+
+```bash
+OPENAI_BASE_URL=https://api.openai.com/v1  # custom proxy
+```
+
+## Ollama (Local)
+
+Run models locally with Ollama.
+
+### Installation
+
+1. Install Ollama from [ollama.com](https://ollama.com)
+2. Pull a model:
+   ```bash
+   ollama pull llama3.2
+   ```
+3. Configure IronClaw:
+   ```bash
+   LLM_BACKEND=ollama
+   OLLAMA_MODEL=llama3.2
+   OLLAMA_BASE_URL=http://localhost:11434  # default
+   ```
+
+### Popular Models
+
+| Model | Command | Notes |
+|-------|---------|-------|
+| Llama 3.2 | `ollama pull llama3.2` | 3B, fast |
+| Mistral | `ollama pull mistral` | 7B, good quality |
+| Qwen 2.5 | `ollama pull qwen2.5` | Multilingual |
+
+See all models at [ollama.com/library](https://ollama.com/library).
+
+## OpenAI-Compatible Providers
+
+All providers below use `LLM_BACKEND=openai_compatible`. Set `LLM_BASE_URL` to the provider's endpoint and `LLM_API_KEY` if required.
+
+### OpenRouter
+
+[OpenRouter](https://openrouter.ai) routes to 300+ models from a single API key.
+
+```bash
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-...
+LLM_MODEL=anthropic/claude-sonnet-4
+```
+
+**Get your API key:** [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys)
+
+#### Popular OpenRouter Models
+
+| Model | ID |
+|-------|----|
+| Claude Sonnet 4 | `anthropic/claude-sonnet-4` |
+| GPT-4o | `openai/gpt-4o` |
+| Llama 4 Maverick | `meta-llama/llama-4-maverick` |
+| Gemini 2.0 Flash | `google/gemini-2.0-flash-001` |
+| Mistral Small | `mistralai/mistral-small-3.1-24b-instruct` |
+
+Browse all models at [openrouter.ai/models](https://openrouter.ai/models).
+
+#### Optional HTTP Headers
+
+OpenRouter supports custom headers for attribution:
+
+```bash
+LLM_EXTRA_HEADERS=HTTP-Referer:https://myapp.com,X-Title:MyApp
+```
+
+### Together AI
+
+[Together AI](https://www.together.ai) provides fast inference for open-source models.
+
+```bash
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=https://api.together.xyz/v1
+LLM_API_KEY=your-together-api-key
+LLM_MODEL=meta-llama/Llama-3.3-70B-Instruct-Turbo
+```
+
+**Get your API key:** [api.together.xyz/settings/api-keys](https://api.together.xyz/settings/api-keys)
+
+#### Popular Together AI Models
+
+| Model | ID |
+|-------|----|
+| Llama 3.3 70B | `meta-llama/Llama-3.3-70B-Instruct-Turbo` |
+| DeepSeek R1 | `deepseek-ai/DeepSeek-R1` |
+| Qwen 2.5 72B | `Qwen/Qwen2.5-72B-Instruct-Turbo` |
+
+### Fireworks AI
+
+[Fireworks AI](https://fireworks.ai) offers fast inference with compound AI system support.
+
+```bash
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=https://api.fireworks.ai/inference/v1
+LLM_API_KEY=fw_...
+LLM_MODEL=accounts/fireworks/models/llama4-maverick-instruct-basic
+```
+
+**Get your API key:** [fireworks.ai/account/api-keys](https://fireworks.ai/account/api-keys)
+
+### vLLM / LiteLLM (Self-Hosted)
+
+For self-hosted inference servers:
+
+```bash
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=http://localhost:8000/v1
+LLM_API_KEY=token-abc123  # set to any string if auth is disabled
+LLM_MODEL=meta-llama/Llama-3.1-8B-Instruct
+```
+
+**LiteLLM proxy** (forwards to any backend, including Bedrock, Vertex, Azure):
+
+```bash
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=http://localhost:4000/v1
+LLM_API_KEY=sk-...
+LLM_MODEL=gpt-4o  # as configured in litellm config.yaml
+```
+
+### LM Studio (Local GUI)
+
+Start LM Studio's local server, then:
+
+```bash
+LLM_BACKEND=openai_compatible
+LLM_BASE_URL=http://localhost:1234/v1
+LLM_MODEL=llama-3.2-3b-instruct-q4_K_M
+# LLM_API_KEY not required for LM Studio
+```
+
+## Extra HTTP Headers
+
+For OpenAI-compatible providers that require custom headers:
+
+```bash
+LLM_EXTRA_HEADERS=HTTP-Referer:https://github.com/nearai/ironclaw,X-Title:ironclaw
+```
+
+**Format:** Comma-separated `Key:Value` pairs. Values can contain colons (e.g., URLs).
+
+## Using the Setup Wizard
+
+Instead of editing `.env` manually, run:
+
+```bash
+ironclaw onboard
+```
+
+Select **"OpenAI-compatible"** for OpenRouter, Together AI, Fireworks, vLLM, LiteLLM, or LM Studio. The wizard will prompt for the base URL and API key.
+
+## Advanced Configuration
+
+### Fallback Models
+
+For NEAR AI, configure automatic failover:
+
+```bash
+NEARAI_FALLBACK_MODEL=openai::gpt-4o-mini
+```
+
+If the primary model fails, requests automatically fall through to the fallback.
+
+### Circuit Breaker
+
+Prevent cascading failures:
+
+```bash
+CIRCUIT_BREAKER_THRESHOLD=5  # Open after 5 consecutive failures
+CIRCUIT_BREAKER_RECOVERY_SECS=30  # Try again after 30 seconds
+```
+
+### Response Caching
+
+Cache LLM responses in memory (saves tokens on repeated prompts):
+
+```bash
+RESPONSE_CACHE_ENABLED=true
+RESPONSE_CACHE_TTL_SECS=3600  # 1 hour
+RESPONSE_CACHE_MAX_ENTRIES=1000
+```
+
+### Retries
+
+```bash
+NEARAI_MAX_RETRIES=3  # 1 initial + 3 retries = 4 total attempts
+```
+
+## Embeddings Providers
+
+For semantic search in workspace memory:
+
+```bash
+# Use NEAR AI for embeddings (default if NEAR AI is configured)
+EMBEDDINGS_PROVIDER=nearai
+EMBEDDINGS_MODEL=text-embedding-3-small
+
+# Or use OpenAI
+EMBEDDINGS_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+EMBEDDINGS_MODEL=text-embedding-3-small
+```
+
+Both NEAR AI and OpenAI use the same model: `text-embedding-3-small`.

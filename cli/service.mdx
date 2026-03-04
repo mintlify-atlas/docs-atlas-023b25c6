@@ -1,0 +1,437 @@
+---
+title: 'ironclaw service'
+description: 'Manage OS service (launchd/systemd)'
+icon: 'gears'
+---
+
+## Overview
+
+The `ironclaw service` command manages IronClaw as a system service, allowing it to run automatically in the background and start on boot.
+
+<Info>
+  - **macOS:** Uses `launchd` (Launch Agent)
+  - **Linux:** Uses `systemd` (user service)
+  - **Windows:** Not currently supported
+</Info>
+
+## Subcommands
+
+### install
+
+Install IronClaw as an OS service:
+
+```bash
+ironclaw service install
+```
+
+This command:
+1. Creates a service unit file (launchd plist or systemd unit)
+2. Configures the service to start on boot
+3. Sets up logging to system journal
+4. Installs the service for the current user
+
+**macOS output:**
+
+```bash
+✓ Created Launch Agent: ~/Library/LaunchAgents/com.ironclaw.agent.plist
+✓ Service installed successfully
+
+To start now: ironclaw service start
+To enable on boot: launchctl load ~/Library/LaunchAgents/com.ironclaw.agent.plist
+```
+
+**Linux output:**
+
+```bash
+✓ Created systemd unit: ~/.config/systemd/user/ironclaw.service
+✓ Service installed successfully
+
+To start now: ironclaw service start
+To enable on boot: systemctl --user enable ironclaw.service
+```
+
+### start
+
+Start the installed service:
+
+```bash
+ironclaw service start
+```
+
+**Output:**
+
+```bash
+✓ Service started successfully
+
+To view logs:
+  macOS: log show --predicate 'processImagePath contains "ironclaw"'
+  Linux: journalctl --user -u ironclaw.service -f
+```
+
+### stop
+
+Stop the running service:
+
+```bash
+ironclaw service stop
+```
+
+**Output:**
+
+```bash
+✓ Service stopped
+```
+
+### status
+
+Check service status:
+
+```bash
+ironclaw service status
+```
+
+**Output (running):**
+
+```bash
+IronClaw Service Status
+
+Status:       running
+PID:          12345
+Uptime:       2 hours 34 minutes
+Memory:       145 MB
+
+Enabled:      yes (starts on boot)
+Unit file:    ~/.config/systemd/user/ironclaw.service
+
+Logs:
+  journalctl --user -u ironclaw.service
+```
+
+**Output (stopped):**
+
+```bash
+IronClaw Service Status
+
+Status:       stopped
+Enabled:      yes (will start on boot)
+Unit file:    ~/.config/systemd/user/ironclaw.service
+
+To start: ironclaw service start
+```
+
+**Output (not installed):**
+
+```bash
+IronClaw Service Status
+
+Status:       not installed
+
+To install: ironclaw service install
+```
+
+### uninstall
+
+Remove the OS service:
+
+```bash
+ironclaw service uninstall
+```
+
+**Output:**
+
+```bash
+✓ Service stopped
+✓ Service uninstalled
+✓ Removed unit file
+```
+
+This removes the service configuration but does not delete your data or configuration files.
+
+## Service Configuration
+
+### macOS (launchd)
+
+The Launch Agent plist is created at:
+```
+~/Library/LaunchAgents/com.ironclaw.agent.plist
+```
+
+**Example plist:**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ironclaw.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/ironclaw</string>
+        <string>run</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/ironclaw.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/ironclaw.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+</dict>
+</plist>
+```
+
+**Manual launchd commands:**
+
+```bash
+# Load (enable and start)
+launchctl load ~/Library/LaunchAgents/com.ironclaw.agent.plist
+
+# Unload (disable and stop)
+launchctl unload ~/Library/LaunchAgents/com.ironclaw.agent.plist
+
+# Start
+launchctl start com.ironclaw.agent
+
+# Stop
+launchctl stop com.ironclaw.agent
+
+# View status
+launchctl list | grep ironclaw
+```
+
+### Linux (systemd)
+
+The systemd unit is created at:
+```
+~/.config/systemd/user/ironclaw.service
+```
+
+**Example unit file:**
+
+```ini
+[Unit]
+Description=IronClaw AI Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ironclaw run
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
+```
+
+**Manual systemd commands:**
+
+```bash
+# Reload systemd configuration
+systemctl --user daemon-reload
+
+# Enable (start on boot)
+systemctl --user enable ironclaw.service
+
+# Disable (don't start on boot)
+systemctl --user disable ironclaw.service
+
+# Start
+systemctl --user start ironclaw.service
+
+# Stop
+systemctl --user stop ironclaw.service
+
+# Restart
+systemctl --user restart ironclaw.service
+
+# View status
+systemctl --user status ironclaw.service
+
+# View logs
+journalctl --user -u ironclaw.service -f
+```
+
+## Environment Variables
+
+The service reads environment variables from:
+
+- `~/.ironclaw/.env` (loaded automatically)
+- System environment (for systemd: `EnvironmentFile=` directive)
+- Service configuration (for launchd: `EnvironmentVariables` dict)
+
+<Note>
+  Ensure your `.env` file contains all required variables like `DATABASE_URL`, `NEARAI_API_KEY`, and `SECRETS_MASTER_KEY`.
+</Note>
+
+## Logging
+
+### macOS Logs
+
+View logs using the `log` command:
+
+```bash
+# Real-time logs
+log stream --predicate 'processImagePath contains "ironclaw"'
+
+# Historical logs
+log show --predicate 'processImagePath contains "ironclaw"' --last 1h
+
+# Errors only
+log show --predicate 'processImagePath contains "ironclaw" and messageType == error' --last 1h
+```
+
+Or check the log files directly:
+```bash
+tail -f /tmp/ironclaw.log
+tail -f /tmp/ironclaw.err
+```
+
+### Linux Logs
+
+View logs using `journalctl`:
+
+```bash
+# Real-time logs
+journalctl --user -u ironclaw.service -f
+
+# Last 100 lines
+journalctl --user -u ironclaw.service -n 100
+
+# Logs since boot
+journalctl --user -u ironclaw.service -b
+
+# Errors only
+journalctl --user -u ironclaw.service -p err
+
+# Logs from the last hour
+journalctl --user -u ironclaw.service --since "1 hour ago"
+```
+
+## Auto-start on Boot
+
+### macOS
+
+To enable auto-start:
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.ironclaw.agent.plist
+```
+
+To disable auto-start:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.ironclaw.agent.plist
+```
+
+### Linux
+
+To enable auto-start:
+
+```bash
+systemctl --user enable ironclaw.service
+```
+
+To disable auto-start:
+
+```bash
+systemctl --user disable ironclaw.service
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Service won't start">
+    Check logs for errors:
+    
+    **macOS:**
+    ```bash
+    cat /tmp/ironclaw.err
+    log show --predicate 'processImagePath contains "ironclaw"' --last 10m
+    ```
+    
+    **Linux:**
+    ```bash
+    journalctl --user -u ironclaw.service -n 50
+    ```
+    
+    Common issues:
+    - Missing environment variables in `.env`
+    - Database connection failure
+    - Invalid configuration
+  </Accordion>
+  
+  <Accordion title="Service stops unexpectedly">
+    The service will automatically restart on failure. Check logs for crash reasons:
+    
+    **Linux:**
+    ```bash
+    systemctl --user status ironclaw.service
+    journalctl --user -u ironclaw.service -p err
+    ```
+    
+    If the service crashes repeatedly, it may be disabled by systemd. Re-enable:
+    ```bash
+    systemctl --user reset-failed ironclaw.service
+    systemctl --user start ironclaw.service
+    ```
+  </Accordion>
+  
+  <Accordion title="Service doesn't start on boot">
+    **macOS:**
+    Ensure the plist is loaded:
+    ```bash
+    launchctl load ~/Library/LaunchAgents/com.ironclaw.agent.plist
+    ```
+    
+    **Linux:**
+    Ensure the service is enabled:
+    ```bash
+    systemctl --user enable ironclaw.service
+    ```
+    
+    You may also need to enable user lingering:
+    ```bash
+    sudo loginctl enable-linger $USER
+    ```
+  </Accordion>
+  
+  <Accordion title="Cannot find ironclaw binary">
+    Ensure `ironclaw` is in your PATH and the service unit has the correct path:
+    
+    **Find binary location:**
+    ```bash
+    which ironclaw
+    ```
+    
+    **Update service unit (Linux):**
+    Edit `~/.config/systemd/user/ironclaw.service` and update `ExecStart=`
+    
+    **Update service unit (macOS):**
+    Edit `~/Library/LaunchAgents/com.ironclaw.agent.plist` and update `ProgramArguments`
+  </Accordion>
+</AccordionGroup>
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw run" icon="play" href="/cli/run">
+    Run the agent directly (foreground)
+  </Card>
+  
+  <Card title="ironclaw status" icon="heart" href="/cli/status">
+    Check system health
+  </Card>
+  
+  <Card title="ironclaw doctor" icon="stethoscope" href="/cli/doctor">
+    Diagnose issues
+  </Card>
+</CardGroup>

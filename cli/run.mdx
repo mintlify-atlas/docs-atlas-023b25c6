@@ -1,0 +1,163 @@
+---
+title: 'ironclaw run'
+description: 'Start the IronClaw AI agent'
+icon: 'play'
+---
+
+## Overview
+
+The `ironclaw run` command starts the IronClaw AI agent in default mode. This is the primary command for running the agent with all configured channels and features enabled.
+
+<Note>
+  If you run `ironclaw` without any subcommand, it will default to `ironclaw run`.
+</Note>
+
+## Usage
+
+```bash
+ironclaw run [OPTIONS]
+```
+
+## Global Options
+
+These options are available for all IronClaw commands:
+
+<ParamField path="--cli-only" type="flag">
+  Run in interactive CLI mode only, disabling all other channels (HTTP, WASM channels, etc.)
+</ParamField>
+
+<ParamField path="--no-db" type="flag">
+  Skip database connection. Useful for testing or running without a configured database backend.
+</ParamField>
+
+<ParamField path="-m, --message" type="string">
+  Single message mode - send one message to the agent and exit immediately after receiving the response.
+  
+  ```bash
+  ironclaw run -m "What's the weather today?"
+  ```
+</ParamField>
+
+<ParamField path="-c, --config" type="path">
+  Path to a custom configuration file. By default, IronClaw uses environment variables and `~/.ironclaw/.env`.
+  
+  ```bash
+  ironclaw run --config /path/to/config.toml
+  ```
+</ParamField>
+
+<ParamField path="--no-onboard" type="flag">
+  Skip the first-run onboarding check. Use this if you've already completed onboarding or want to bypass it.
+</ParamField>
+
+## Examples
+
+### Start the agent normally
+
+```bash
+ironclaw run
+```
+
+Or simply:
+
+```bash
+ironclaw
+```
+
+### Run in CLI-only mode
+
+Disable all channels except the command-line interface:
+
+```bash
+ironclaw run --cli-only
+```
+
+### Send a single message
+
+Send one message and exit:
+
+```bash
+ironclaw run -m "Summarize my recent notes"
+```
+
+### Run without database
+
+Run the agent without connecting to the database:
+
+```bash
+ironclaw run --no-db
+```
+
+## What Happens When You Run
+
+When you execute `ironclaw run`, the agent:
+
+1. Loads configuration from environment variables and config files
+2. Connects to the database (unless `--no-db` is specified)
+3. Initializes the NEAR AI session for LLM access
+4. Starts configured channels (CLI, HTTP, WASM channels)
+5. Begins the heartbeat loop (if enabled in settings)
+6. Listens for messages and executes agent loops
+
+## Terminal Output
+
+Typical output when starting the agent:
+
+```bash
+$ ironclaw run
+IronClaw v0.1.0
+Database: connected (PostgreSQL)
+Session: authenticated
+Channels: cli, http:3000
+Tools: 3 installed
+
+Agent ready. Type your message or 'help' for commands.
+> 
+```
+
+## First Run
+
+If this is your first time running IronClaw, you'll be prompted to complete onboarding:
+
+```bash
+$ ironclaw run
+Welcome to IronClaw!
+
+It looks like this is your first time running IronClaw.
+Run 'ironclaw onboard' to get started.
+```
+
+To skip this check, use the `--no-onboard` flag.
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw onboard" icon="rocket" href="/cli/onboard">
+    Complete first-time setup
+  </Card>
+  
+  <Card title="ironclaw status" icon="heart" href="/cli/status">
+    Check system health
+  </Card>
+  
+  <Card title="ironclaw config" icon="gear" href="/cli/config">
+    Manage configuration settings
+  </Card>
+  
+  <Card title="ironclaw doctor" icon="stethoscope" href="/cli/doctor">
+    Run diagnostics
+  </Card>
+</CardGroup>
+
+## Environment Variables
+
+Key environment variables that affect `ironclaw run`:
+
+- `DATABASE_URL` - PostgreSQL connection string
+- `DATABASE_BACKEND` - Database backend (`postgres`, `libsql`, `turso`)
+- `NEARAI_API_KEY` - NEAR AI API key for LLM access
+- `SECRETS_MASTER_KEY` - Master encryption key for secrets
+- `HEARTBEAT_ENABLED` - Enable/disable heartbeat loop (`true`/`false`)
+- `HTTP_PORT` - Port for HTTP channel (default: 3000)
+
+See [Configuration](/configuration/environment-variables) for a complete list of environment variables.

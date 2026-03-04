@@ -1,0 +1,391 @@
+---
+title: 'ironclaw tool'
+description: 'Manage WASM tools (install, list, remove, auth, setup)'
+icon: 'wrench'
+---
+
+## Overview
+
+The `ironclaw tool` command provides subcommands for managing WebAssembly (WASM) tools. Tools are sandboxed plugins that extend the agent's capabilities with custom functionality.
+
+## Subcommands
+
+### install
+
+Install a WASM tool from source or a compiled `.wasm` file:
+
+```bash
+ironclaw tool install <PATH> [OPTIONS]
+```
+
+<ParamField path="path" type="path" required>
+  Path to tool source directory (with `Cargo.toml`) or a `.wasm` file.
+</ParamField>
+
+<ParamField path="-n, --name" type="string">
+  Tool name. Defaults to the crate name from `Cargo.toml` or the filename.
+</ParamField>
+
+<ParamField path="--capabilities" type="path">
+  Path to capabilities JSON file. Auto-detected if not specified.
+</ParamField>
+
+<ParamField path="-t, --target" type="path">
+  Installation directory. Defaults to `~/.ironclaw/tools/`.
+</ParamField>
+
+<ParamField path="--release" type="boolean" default="true">
+  Build in release mode (optimized).
+</ParamField>
+
+<ParamField path="--skip-build" type="flag">
+  Skip compilation and use an existing `.wasm` file.
+</ParamField>
+
+<ParamField path="-f, --force" type="flag">
+  Overwrite if the tool already exists.
+</ParamField>
+
+**Examples:**
+
+```bash
+# Install from source directory
+ironclaw tool install ~/my-tools/weather-tool/
+
+# Install a pre-built .wasm file
+ironclaw tool install ~/downloads/calculator.wasm
+
+# Install with custom name
+ironclaw tool install ./tool --name my-custom-tool
+
+# Force overwrite existing installation
+ironclaw tool install ./tool --force
+```
+
+**Output:**
+
+```bash
+Installing weather-tool to /home/user/.ironclaw/tools/weather-tool.wasm
+  Copying capabilities from weather-tool.capabilities.json
+
+Installed successfully:
+  Name: weather-tool
+  WASM: /home/user/.ironclaw/tools/weather-tool.wasm
+  Size: 245760 bytes
+  Hash: a3f9c8e2b1d47f5a
+  Caps: /home/user/.ironclaw/tools/weather-tool.capabilities.json
+```
+
+### list
+
+List installed tools:
+
+```bash
+ironclaw tool list [OPTIONS]
+```
+
+<ParamField path="-d, --dir" type="path">
+  Directory to list tools from. Defaults to `~/.ironclaw/tools/`.
+</ParamField>
+
+<ParamField path="-v, --verbose" type="flag">
+  Show detailed information including capabilities and permissions.
+</ParamField>
+
+**Examples:**
+
+```bash
+ironclaw tool list
+ironclaw tool list --verbose
+```
+
+**Output (normal):**
+
+```bash
+Installed tools in /home/user/.ironclaw/tools:
+
+  calculator (42.3 KB, caps: ✓)
+  weather-tool (240.0 KB, caps: ✓)
+  notion-sync (156.8 KB, caps: ✓)
+```
+
+**Output (verbose):**
+
+```bash
+Installed tools in /home/user/.ironclaw/tools:
+
+  weather-tool (240.0 KB)
+    Path: /home/user/.ironclaw/tools/weather-tool.wasm
+    Hash: a3f9c8e2
+    Caps: yes
+    Perms: http: api.openweathermap.org, secrets: 1
+
+  notion-sync (156.8 KB)
+    Path: /home/user/.ironclaw/tools/notion-sync.wasm
+    Hash: f2a8c9d1
+    Caps: yes
+    Perms: http: api.notion.com, workspace: read
+```
+
+### remove
+
+Remove an installed tool:
+
+```bash
+ironclaw tool remove <NAME> [OPTIONS]
+```
+
+<ParamField path="name" type="string" required>
+  Name of the tool to remove.
+</ParamField>
+
+<ParamField path="-d, --dir" type="path">
+  Directory to remove tool from. Defaults to `~/.ironclaw/tools/`.
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw tool remove weather-tool
+```
+
+**Output:**
+
+```bash
+Removed /home/user/.ironclaw/tools/weather-tool.wasm
+Removed /home/user/.ironclaw/tools/weather-tool.capabilities.json
+
+Tool 'weather-tool' removed.
+```
+
+### info
+
+Show detailed information about a tool:
+
+```bash
+ironclaw tool info <NAME_OR_PATH> [OPTIONS]
+```
+
+<ParamField path="name_or_path" type="string" required>
+  Tool name or path to a `.wasm` file.
+</ParamField>
+
+<ParamField path="-d, --dir" type="path">
+  Directory to look for tool. Defaults to `~/.ironclaw/tools/`.
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw tool info weather-tool
+```
+
+**Output:**
+
+```bash
+Tool: weather-tool
+Path: /home/user/.ironclaw/tools/weather-tool.wasm
+Size: 245760 bytes (240.0 KB)
+Hash: a3f9c8e2b1d47f5ac3e8d9a2f1c4b7e8
+
+Capabilities (/home/user/.ironclaw/tools/weather-tool.capabilities.json):
+  HTTP:
+    GET,POST api.openweathermap.org /*
+  Credentials:
+    api_key: openweather_api_key -> header:X-API-Key
+  Rate limit: 60/min, 1000/hour
+  Secrets (existence check only):
+    openweather_api_key
+```
+
+### auth
+
+Configure authentication for a tool (OAuth or token-based):
+
+```bash
+ironclaw tool auth <NAME> [OPTIONS]
+```
+
+<ParamField path="name" type="string" required>
+  Name of the tool to authenticate.
+</ParamField>
+
+<ParamField path="-d, --dir" type="path">
+  Directory to look for tool. Defaults to `~/.ironclaw/tools/`.
+</ParamField>
+
+<ParamField path="-u, --user" type="string" default="default">
+  User ID for storing the secret.
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw tool auth notion-sync
+```
+
+**OAuth Flow Output:**
+
+```bash
+╔════════════════════════════════════════════════════════════════╗
+║                     Notion Authentication                      ║
+╚════════════════════════════════════════════════════════════════╝
+
+  Starting OAuth authentication...
+
+  Opening browser for Notion login...
+
+  Waiting for authorization...
+
+  Exchanging code for token...
+
+  ✓ Notion connected!
+
+  The tool can now access the API.
+```
+
+**Manual Token Entry:**
+
+```bash
+╔════════════════════════════════════════════════════════════════╗
+║                   OpenWeather Authentication                   ║
+╚════════════════════════════════════════════════════════════════╝
+
+  Setup instructions:
+
+    1. Go to https://openweathermap.org/api
+    2. Sign up for a free account
+    3. Navigate to API Keys
+    4. Copy your API key
+
+  Press Enter to open setup page (or 's' to skip): 
+
+  Token format: sk-...
+
+  Paste your token: ********************
+
+  Validating token... ✓
+
+  ✓ OpenWeather connected!
+
+  The tool can now access the API.
+```
+
+### setup
+
+Configure required secrets for a tool:
+
+```bash
+ironclaw tool setup <NAME> [OPTIONS]
+```
+
+<ParamField path="name" type="string" required>
+  Name of the tool to set up.
+</ParamField>
+
+<ParamField path="-d, --dir" type="path">
+  Directory to look for tool. Defaults to `~/.ironclaw/tools/`.
+</ParamField>
+
+<ParamField path="-u, --user" type="string" default="default">
+  User ID for storing secrets.
+</ParamField>
+
+**Example:**
+
+```bash
+ironclaw tool setup database-tool
+```
+
+**Output:**
+
+```bash
+╔════════════════════════════════════════════════════════════════╗
+║                       Database Tool Setup                      ║
+╚════════════════════════════════════════════════════════════════╝
+
+  Database host: ********************
+    ✓ Saved.
+
+  Database password: ********************
+    ✓ Saved.
+
+  API key (optional, Enter to skip): 
+    Skipped.
+
+  ✓ Database Tool setup complete!
+```
+
+## Tool Capabilities
+
+Tools must include a `.capabilities.json` file that defines their permissions:
+
+```json
+{
+  "http": {
+    "allowlist": [
+      {
+        "host": "api.openweathermap.org",
+        "methods": ["GET"],
+        "path_prefix": "/data/2.5"
+      }
+    ],
+    "credentials": {
+      "api_key": {
+        "secret_name": "openweather_api_key",
+        "location": {"header": "X-API-Key"}
+      }
+    },
+    "rate_limit": {
+      "requests_per_minute": 60,
+      "requests_per_hour": 1000
+    }
+  },
+  "secrets": {
+    "allowed_names": ["openweather_api_key"]
+  }
+}
+```
+
+<Note>
+  Tools without a capabilities file will run with no permissions (default deny).
+</Note>
+
+## Building WASM Tools
+
+To build a tool from source:
+
+1. Create a Rust project targeting `wasm32-wasip1`:
+   ```bash
+   cargo new --lib my-tool
+   cd my-tool
+   ```
+
+2. Add WASM target:
+   ```bash
+   rustup target add wasm32-wasip1
+   ```
+
+3. Build the component:
+   ```bash
+   cargo build --release --target wasm32-wasip1
+   ```
+
+4. Install with IronClaw:
+   ```bash
+   ironclaw tool install .
+   ```
+
+See the [Tool Development Guide](/guides/building-tools) for details.
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw mcp" icon="server" href="/cli/mcp">
+    Manage MCP servers
+  </Card>
+  
+  <Card title="ironclaw status" icon="heart" href="/cli/status">
+    View installed tool count
+  </Card>
+</CardGroup>

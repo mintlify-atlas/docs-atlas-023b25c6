@@ -1,0 +1,403 @@
+---
+title: 'ironclaw doctor'
+description: 'Run active health diagnostics and validate configuration'
+icon: 'stethoscope'
+---
+
+## Overview
+
+The `ironclaw doctor` command runs comprehensive diagnostic checks to validate your IronClaw installation. It actively probes external dependencies, tests database connectivity, and verifies configuration to surface issues before they cause problems during operation.
+
+<Info>
+  Unlike `ironclaw status` which provides passive status information, `doctor` performs active tests including network calls and binary checks.
+</Info>
+
+## Usage
+
+```bash
+ironclaw doctor
+```
+
+No options or arguments required.
+
+## Output
+
+```bash
+IronClaw Doctor
+===============
+
+  [pass] NEAR AI session: session found (/home/user/.ironclaw/session.json)
+  [pass] Database backend: PostgreSQL connected
+  [pass] Workspace directory: /home/user/.ironclaw
+  [pass] Docker: Docker version 24.0.6, build ed223bc
+  [skip] cloudflared: cloudflared not found in PATH
+  [skip] ngrok: ngrok not found in PATH
+  [skip] tailscale: tailscale not found in PATH
+
+  5 passed, 0 failed
+
+  Some checks failed. This is normal if you don't use those features.
+```
+
+## Diagnostic Checks
+
+### NEAR AI Session
+
+Validates authentication with NEAR AI:
+
+- **Pass:** Session file exists and is readable
+- **Fail:** Session file missing or empty
+
+**Pass output:**
+```
+  [pass] NEAR AI session: session found (/home/user/.ironclaw/session.json)
+```
+
+**Fail output:**
+```
+  [FAIL] NEAR AI session: session file not found at /home/user/.ironclaw/session.json. Run `ironclaw onboard`
+```
+
+**API key mode:**
+```
+  [pass] NEAR AI session: API key configured
+```
+
+### Database Backend
+
+Tests database connectivity:
+
+- **PostgreSQL:** Attempts connection and executes `SELECT 1`
+- **libSQL:** Checks if database file exists or can be created
+
+**Pass output:**
+```
+  [pass] Database backend: PostgreSQL connected
+```
+
+or
+
+```
+  [pass] Database backend: libSQL database exists (/home/user/.ironclaw/ironclaw.db)
+```
+
+**Fail output:**
+```
+  [FAIL] Database backend: PostgreSQL connection failed: connection refused
+```
+
+### Workspace Directory
+
+Verifies the workspace directory exists or can be created:
+
+**Pass output:**
+```
+  [pass] Workspace directory: /home/user/.ironclaw
+```
+
+or
+
+```
+  [pass] Workspace directory: /home/user/.ironclaw will be created on first run
+```
+
+**Fail output:**
+```
+  [FAIL] Workspace directory: /home/user/.ironclaw exists but is not a directory
+```
+
+### Docker
+
+Checks if Docker is installed and running:
+
+**Pass output:**
+```
+  [pass] Docker: Docker version 24.0.6, build ed223bc
+```
+
+**Skip output:**
+```
+  [skip] Docker: docker not found in PATH
+```
+
+**Fail output:**
+```
+  [FAIL] Docker: exited with error code 1
+```
+
+<Note>
+  Docker is required for sandboxed code execution. If you don't need code execution, it's safe to skip this check.
+</Note>
+
+### cloudflared
+
+Checks for Cloudflare Tunnel CLI:
+
+**Pass output:**
+```
+  [pass] cloudflared: cloudflared version 2024.2.1
+```
+
+**Skip output:**
+```
+  [skip] cloudflared: cloudflared not found in PATH
+```
+
+<Info>
+  `cloudflared` is only needed if you want to expose your agent to the internet via Cloudflare Tunnels.
+</Info>
+
+### ngrok
+
+Checks for ngrok tunnel client:
+
+**Pass output:**
+```
+  [pass] ngrok: ngrok version 3.5.0
+```
+
+**Skip output:**
+```
+  [skip] ngrok: ngrok not found in PATH
+```
+
+### tailscale
+
+Checks for Tailscale VPN client:
+
+**Pass output:**
+```
+  [pass] tailscale: 1.56.1
+```
+
+**Skip output:**
+```
+  [skip] tailscale: tailscale not found in PATH
+```
+
+## Exit Codes
+
+The `doctor` command always exits with code `0`, even if some checks fail. This is intentional — not all checks are required for every use case.
+
+- Missing tunnel tools (`cloudflared`, `ngrok`, `tailscale`) are expected if you don't need remote access
+- Missing Docker is acceptable if you don't use code execution
+
+<Warning>
+  Critical failures (database, session) should be addressed before running the agent.
+</Warning>
+
+## Check Results
+
+Three possible outcomes for each check:
+
+### Pass
+
+```
+  [pass] Check name: details
+```
+
+The check succeeded. Everything is working as expected.
+
+### Fail
+
+```
+  [FAIL] Check name: error details
+```
+
+The check failed. This may indicate a problem that needs attention.
+
+### Skip
+
+```
+  [skip] Check name: reason
+```
+
+The check was skipped (usually because the tool isn't installed). This is often expected and not a problem.
+
+## Examples
+
+### First-time setup validation
+
+After running `ironclaw onboard`, verify everything is configured:
+
+```bash
+ironclaw onboard
+ironclaw doctor
+```
+
+### Troubleshooting
+
+If the agent isn't starting:
+
+```bash
+ironclaw doctor
+```
+
+Look for `[FAIL]` results and address them.
+
+### Pre-deployment check
+
+Before deploying to production:
+
+```bash
+ironclaw doctor > health-check.txt
+cat health-check.txt
+```
+
+Verify all critical checks pass.
+
+### CI/CD pipeline
+
+Add to your CI/CD pipeline:
+
+```bash
+#!/bin/bash
+ironclaw doctor
+
+# Check for critical failures
+if ironclaw doctor | grep -q "\[FAIL\] NEAR AI session\|\[FAIL\] Database backend"; then
+  echo "Critical checks failed!"
+  exit 1
+fi
+```
+
+## Common Issues and Solutions
+
+<AccordionGroup>
+  <Accordion title="NEAR AI session not found">
+    **Problem:**
+    ```
+    [FAIL] NEAR AI session: session file not found
+    ```
+    
+    **Solution:**
+    ```bash
+    ironclaw onboard
+    ```
+    
+    This will authenticate with NEAR AI and create the session file.
+  </Accordion>
+  
+  <Accordion title="Database connection failed">
+    **Problem:**
+    ```
+    [FAIL] Database backend: PostgreSQL connection failed: connection refused
+    ```
+    
+    **Solution:**
+    1. Check that PostgreSQL is running:
+       ```bash
+       pg_isready
+       ```
+    2. Verify `DATABASE_URL` is correct:
+       ```bash
+       echo $DATABASE_URL
+       ```
+    3. Test connection manually:
+       ```bash
+       psql $DATABASE_URL -c "SELECT 1"
+       ```
+    
+    Or switch to libSQL:
+    ```bash
+    export DATABASE_BACKEND=libsql
+    ironclaw doctor
+    ```
+  </Accordion>
+  
+  <Accordion title="Docker not found">
+    **Problem:**
+    ```
+    [skip] Docker: docker not found in PATH
+    ```
+    
+    **Solution (if you need Docker):**
+    
+    **macOS:**
+    ```bash
+    brew install --cask docker
+    ```
+    
+    **Linux:**
+    ```bash
+    curl -fsSL https://get.docker.com | sh
+    sudo usermod -aG docker $USER
+    ```
+    
+    **Skip this check** if you don't need code execution features.
+  </Accordion>
+  
+  <Accordion title="Workspace directory is not a directory">
+    **Problem:**
+    ```
+    [FAIL] Workspace directory: /home/user/.ironclaw exists but is not a directory
+    ```
+    
+    **Solution:**
+    The workspace path is occupied by a file. Remove it:
+    ```bash
+    rm ~/.ironclaw
+    mkdir ~/.ironclaw
+    ```
+    
+    Or choose a different path:
+    ```bash
+    export IRONCLAW_HOME=/path/to/workspace
+    ironclaw doctor
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## What Gets Checked
+
+### Configuration Checks
+
+- NEAR AI authentication (session file or API key)
+- Database backend (PostgreSQL or libSQL)
+- Workspace directory
+
+### External Binary Checks
+
+- Docker (for code execution)
+- cloudflared (for Cloudflare Tunnels)
+- ngrok (for ngrok tunnels)
+- tailscale (for Tailscale VPN)
+
+### Not Checked
+
+- WASM tools (use `ironclaw tool list`)
+- MCP servers (use `ironclaw mcp list`)
+- Settings values (use `ironclaw config list`)
+- Service status (use `ironclaw service status`)
+
+## Status vs Doctor
+
+Two commands provide health information:
+
+| Feature | `ironclaw status` | `ironclaw doctor` |
+|---------|------------------|------------------|
+| Speed | Fast | Slower |
+| Network calls | No | Yes |
+| Binary checks | No | Yes |
+| Database probe | Passive | Active |
+| Use case | Monitoring | Troubleshooting |
+
+<Tip>
+  Use `status` for quick checks. Use `doctor` for thorough diagnostics.
+</Tip>
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="ironclaw status" icon="heart" href="/cli/status">
+    Quick health check
+  </Card>
+  
+  <Card title="ironclaw onboard" icon="rocket" href="/cli/onboard">
+    Fix configuration issues
+  </Card>
+  
+  <Card title="ironclaw config list" icon="gear" href="/cli/config">
+    View all settings
+  </Card>
+</CardGroup>
